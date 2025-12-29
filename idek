@@ -150,6 +150,8 @@ local Config = {
     },
 
         ValidAnimationIds = {},
+		NPCAnimIdToName = {},
+
 
     -- Resolved Skill Name <-> AnimationId maps
     SkillAnimIdToName = {},  -- [animId] = "Skill Name"
@@ -1677,6 +1679,8 @@ getgenv().LoadValidAnimations = function()
     syde:Notify({ Title = 'System', Content = 'Loading Animations...', Duration = 3 })
 
     Config.ValidAnimationIds = {}
+	Config.NPCAnimIdToName = {}
+
     Config.SkillAnimIdToName = {}
     Config.SkillNameToAnimId = {}
 
@@ -1692,6 +1696,12 @@ getgenv().LoadValidAnimations = function()
             if obj:IsA("Animation") then
                 local animId = tostring(obj.AnimationId)
                 Config.ValidAnimationIds[animId] = category
+
+				-- ✅ Build NPC ID -> Name mapping from NPCAnimPacks
+if category == "NPC" then
+    Config.NPCAnimIdToName[animId] = obj.Name
+end
+
 
                 -- ✅ Build skill name mapping from BOTH Skills + BreathAnims
                 if category == "Skills" or category == "Breath" then
@@ -2825,16 +2835,18 @@ end
         -- Just ensuring cleanName is correct
         
     elseif catName == "NPC" then
-    -- Only react to NPC animations that contain "swing" (case-insensitive)
-    local nm = (track.Name or "")
-    if not nm:lower():find("swing", 1, true) then
+    -- Look up the NPCAnimPacks animation name by AnimationId
+    local npcAnimName = Config.NPCAnimIdToName[animId]
+
+    -- Only react to Swing 1 / Swing 2 (must match names in NPCAnimPacks)
+    if npcAnimName ~= "Swing 1" and npcAnimName ~= "Swing 2" then
         return
     end
 
     reaction = Config.NPC.ReactionPct
     range = Config.NPC.Range
     color = Config.NPC.Color
-    cleanName = "NPC Swing"
+    cleanName = npcAnimName
 end
 
 
