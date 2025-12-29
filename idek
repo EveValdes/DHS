@@ -56,6 +56,13 @@ local Config = {
     AwarenessRange = 45,  -- Max distance to check for enemies
     TargetFolder = Workspace:FindFirstChild("Live"),
 
+	AutoFarmSlot = 1,
+
+	AutoFarmSlots = {
+    [1] = { X = 900, Y = 630 }, -- Slot 1 (current default)
+    [2] = { X = 900, Y = 670 }, -- Slot 2 (EDIT THESE)
+    [3] = { X = 900, Y = 700 }, -- Slot 3 (EDIT THESE)
+},
 
     SpeedHubEnabled = false,
     
@@ -82,31 +89,32 @@ local Config = {
     },
 
     Demons = {
-        ["Hantengu"] = 20,
-        ["Akaza"] = 20,
-        ["WindFan"] = 20, -- "Wind Fan" in name, key is likely "WindFan" or "Wind Fan" depending on attribute. 
-        ["Wind Fan"] = 20, -- Added both just in case
-        ["Lightning"] = 20,
-        ["Sonic"] = 20,
-        ["Douma"] = 20,
-        ["Spike"] = 20,
-        ["Speed Augmentation"] = 20,
-        ["BloodScythe"] = 20, -- "Blood Scythe"
-        ["Blood Scythe"] = 20,
-        ["Obi"] = 20,
-        ["String"] = 20,
-        ["Enmu"] = 20,
-        ["Zohakuten"] = 20,
-        ["Staff"] = 20,
-        ["Biwa"] = 20,
-        ["Hairo"] = 20,
-        ["Gyokko"] = 20,
-        ["Hiasobi Temari"] = 20,
-        ["Arrow"] = 20,
-        ["Demon Flames"] = 20,
-        ["Muzan BDA"] = 20,
-        ["Suppressed Muzan"] = 20
-    },
+    ["Hantengu"] = { ReactionPct = 20, Range = 16 },
+    ["Akaza"] = { ReactionPct = 20, Range = 16 },
+    ["WindFan"] = { ReactionPct = 20, Range = 16 },
+    ["Wind Fan"] = { ReactionPct = 20, Range = 16 },
+    ["Lightning"] = { ReactionPct = 20, Range = 16 },
+    ["Sonic"] = { ReactionPct = 20, Range = 16 },
+    ["Douma"] = { ReactionPct = 20, Range = 16 },
+    ["Spike"] = { ReactionPct = 20, Range = 16 },
+    ["Speed Augmentation"] = { ReactionPct = 20, Range = 16 },
+    ["BloodScythe"] = { ReactionPct = 20, Range = 16 },
+    ["Blood Scythe"] = { ReactionPct = 20, Range = 16 },
+    ["Obi"] = { ReactionPct = 20, Range = 16 },
+    ["String"] = { ReactionPct = 20, Range = 16 },
+    ["Enmu"] = { ReactionPct = 20, Range = 16 },
+    ["Zohakuten"] = { ReactionPct = 20, Range = 16 },
+    ["Staff"] = { ReactionPct = 20, Range = 16 },
+    ["Biwa"] = { ReactionPct = 20, Range = 16 },
+    ["Hairo"] = { ReactionPct = 20, Range = 16 },
+    ["Gyokko"] = { ReactionPct = 20, Range = 16 },
+    ["Hiasobi Temari"] = { ReactionPct = 20, Range = 16 },
+    ["Arrow"] = { ReactionPct = 20, Range = 16 },
+    ["Demon Flames"] = { ReactionPct = 20, Range = 16 },
+    ["Muzan BDA"] = { ReactionPct = 20, Range = 16 },
+    ["Suppressed Muzan"] = { ReactionPct = 20, Range = 16 },
+},
+
 
     -- [[ SKILL SPECIFIC CONFIGS ]]
     -- Overrides breath defaults if the animation matches
@@ -159,28 +167,74 @@ local SaveManager = {}
 local FileName = "ZoneConfig.json"
 
 function SaveManager:Save()
-    if writefile then
-        local dataToSave = {
-            AwarenessRange = Config.AwarenessRange,
-            SpeedHubEnabled = Config.SpeedHubEnabled, -- NEW (can be anywhere)
+    if not writefile then return end
 
-            Breaths = {},
-            Demons = Config.Demons, -- NEW
-            Skills = Config.Skills, -- <-- FIX: comma was missing
+    local dataToSave = {
+        AwarenessRange = Config.AwarenessRange,
+        SpeedHubEnabled = Config.SpeedHubEnabled,
+
+		AutoFarmSlot = Config.AutoFarmSlot,
+AutoFarmSlots = Config.AutoFarmSlots,
+
+
+        Breaths = {},
+        Demons = {},   -- ✅ now saved as {ReactionPct, Range}
+        Skills = Config.Skills,
+    }
+
+    -- Breaths (unchanged)
+    for name, data in pairs(Config.Breaths) do
+        dataToSave.Breaths[name] = {
+            SkillPct = data.SkillPct,
+            CombatPct = data.CombatPct,
+            Range = data.Range
         }
-
-        for name, data in pairs(Config.Breaths) do
-            dataToSave.Breaths[name] = {
-                SkillPct = data.SkillPct,
-                CombatPct = data.CombatPct,
-                Range = data.Range
-            }
-        end
-
-        writefile(FileName, HttpService:JSONEncode(dataToSave))
     end
+
+    -- ✅ Demons (NEW: save ReactionPct + Range, with backwards compat)
+    if Config and type(Config.Demons) == "table" then
+        for name, data in pairs(Config.Demons) do
+            if type(data) == "table" then
+                dataToSave.Demons[name] = {
+                    ReactionPct = data.ReactionPct,
+                    Range = data.Range
+                }
+            elseif type(data) == "number" then
+                -- old format support (in case you still have numbers somewhere)
+                dataToSave.Demons[name] = {
+                    ReactionPct = data,
+                    Range = 16
+                }
+            end
+        end
+    end
+
+    writefile(FileName, HttpService:JSONEncode(dataToSave))
 end
 
+
+-- Ensure defaults exist (so slot logic never indexes nil)
+Config.AutoFarmSlot = tonumber(Config.AutoFarmSlot) or 1
+Config.AutoFarmSlots = Config.AutoFarmSlots or {
+    [1] = { X = 900, Y = 700 },
+    [2] = { X = 900, Y = 700 },
+    [3] = { X = 900, Y = 700 },
+}
+
+local function ApplyAutoFarmSlot(slotNum)
+    slotNum = tonumber(slotNum) or 1
+    if not Config.AutoFarmSlots[slotNum] then slotNum = 1 end
+
+    Config.AutoFarmSlot = slotNum
+
+    local s = Config.AutoFarmSlots[slotNum]
+    getgenv().AutoFarmEmptyLiveX = tonumber(s.X) or 900
+    getgenv().AutoFarmEmptyLiveY = tonumber(s.Y) or 700
+
+    if SaveManager and SaveManager.Save then
+        SaveManager:Save()
+    end
+end
 
 
 
@@ -189,13 +243,17 @@ function SaveManager:Load()
         local success, result = pcall(function()
             return HttpService:JSONDecode(readfile(FileName))
         end)
-        
+
         if success and result then
-            if result.AwarenessRange then Config.AwarenessRange = result.AwarenessRange end
-            
+            -- Global
+            if result.AwarenessRange then
+                Config.AwarenessRange = result.AwarenessRange
+            end
+
+            -- Breaths
             if result.Breaths then
                 for name, savedData in pairs(result.Breaths) do
-                    if Config.Breaths[name] then
+                    if Config.Breaths[name] and type(savedData) == "table" then
                         Config.Breaths[name].SkillPct = savedData.SkillPct or Config.Breaths[name].SkillPct
                         Config.Breaths[name].CombatPct = savedData.CombatPct or Config.Breaths[name].CombatPct
                         Config.Breaths[name].Range = savedData.Range or Config.Breaths[name].Range
@@ -203,20 +261,44 @@ function SaveManager:Load()
                 end
             end
 
+            -- SpeedHub toggle
             if result.SpeedHubEnabled ~= nil then
-    Config.SpeedHubEnabled = result.SpeedHubEnabled
-end
+                Config.SpeedHubEnabled = result.SpeedHubEnabled
+            end
 
+            -- ✅ AutoFarm Slot selection + coordinates
+            if result.AutoFarmSlot ~= nil then
+                Config.AutoFarmSlot = tonumber(result.AutoFarmSlot) or Config.AutoFarmSlot or 1
+            end
+            if result.AutoFarmSlots and type(result.AutoFarmSlots) == "table" then
+                Config.AutoFarmSlots = result.AutoFarmSlots
+            end
 
-            -- [[ NEW: Load Demons ]]
-            if result.Demons then
-                for name, pct in pairs(result.Demons) do
-                    if Config.Demons[name] then
-                        Config.Demons[name] = pct
+            -- ✅ Demons (supports NEW table format + OLD number format)
+            if result.Demons and type(result.Demons) == "table" then
+                for name, saved in pairs(result.Demons) do
+                    local demon = Config.Demons and Config.Demons[name]
+                    if demon then
+                        if type(demon) == "table" then
+                            if type(saved) == "table" then
+                                demon.ReactionPct = saved.ReactionPct or demon.ReactionPct
+                                demon.Range = saved.Range or demon.Range
+                            elseif type(saved) == "number" then
+                                demon.ReactionPct = saved
+                            end
+                        elseif type(demon) == "number" then
+                            -- If YOUR Config.Demons wasn't updated yet, still allow loading old numeric values
+                            if type(saved) == "table" then
+                                Config.Demons[name] = saved.ReactionPct or demon
+                            elseif type(saved) == "number" then
+                                Config.Demons[name] = saved
+                            end
+                        end
                     end
                 end
             end
 
+            -- Skills
             if result.Skills then
                 for name, pct in pairs(result.Skills) do
                     if Config.Skills[name] then
@@ -224,11 +306,10 @@ end
                     end
                 end
             end
-            print("[SaveManager] Loaded.")
+
         end
     end
 end
-
 
 
 getgenv().SpeedHubEnabled = getgenv().SpeedHubEnabled or false
@@ -282,7 +363,12 @@ local success, err = pcall(function()
 	-- Fixed click positions
 	local CLICK_X, CLICK_Y = 814, 631
 	local VE_TOP_X, VE_TOP_Y = 1889, 50
-	local EMPTY_LIVE_X, EMPTY_LIVE_Y = 900, 700
+-- Pulled from global slot selection (defaults if unset)
+local function getEmptyLiveXY()
+    local x = tonumber(getgenv().AutoFarmEmptyLiveX) or 900
+    local y = tonumber(getgenv().AutoFarmEmptyLiveY) or 700
+    return x, y
+end
 
 	-- Intervals
 	local VILLAGER_ESCORT_INTERVAL = 2
@@ -580,7 +666,8 @@ end
 			-- run if either PlaceId OR GameId matches the target
 			if placeMatch or gameMatch then
 				print("[DEBUG] MATCHED ID → clicking at", EMPTY_LIVE_X, EMPTY_LIVE_Y)
-				VirtualClickAt(EMPTY_LIVE_X, EMPTY_LIVE_Y)
+				local ex, ey = getEmptyLiveXY()
+VirtualClickAt(ex, ey)
 				task.wait(0.15)
 			else
 				print("[DEBUG] No ID match → waiting")
@@ -1107,8 +1194,26 @@ end
 
 SaveManager:Load()
 
--- Apply saved SpeedHub state on load (this also loads SpeedHub if enabled)
-ApplySpeedHubState(Config.SpeedHubEnabled == true)
+-- Apply slot AFTER load (and ApplyAutoFarmSlot now definitely exists)
+ApplyAutoFarmSlot(Config.AutoFarmSlot or 1)
+
+-- Apply saved SpeedHub state on load (loads SpeedHub if enabled)
+-- Guard against LoadSpeedHub not existing yet (ordering issue)
+if Config.SpeedHubEnabled == true then
+    if typeof(LoadSpeedHub) == "function" then
+        ApplySpeedHubState(true)
+    else
+        -- If LoadSpeedHub is defined later in the file, delay this call
+        task.defer(function()
+            if typeof(LoadSpeedHub) == "function" then
+                ApplySpeedHubState(true)
+            end
+        end)
+    end
+else
+    ApplySpeedHubState(false)
+end
+
 
 
 -- ==============================================================================
@@ -1294,6 +1399,8 @@ end)
 
 local MainTab = Window:InitTab({ Title = 'Main' })
 local BreathTab = Window:InitTab({ Title = 'Breaths' })
+local AutoFarmTab = Window:InitTab({ Title = 'AutoFarm' }) -- ✅ NEW TAB
+
 local DemonTab = Window:InitTab({ Title = 'Demons' }) -- [[ NEW TAB ]]
 local SkillTab = Window:InitTab({ Title = 'Skills' })
 
@@ -1306,8 +1413,72 @@ MainTab:Toggle({
     CallBack = function(v) Config.ParryEnabled = v end
 })
 
-MainTab:Toggle({
-    Title = "Slayer Auto Farm",
+
+-- Shows current slot in UI text
+local function SlotLabel()
+    return "AutoFarm Click Slot (Selected: Slot " .. tostring(Config.AutoFarmSlot or 1) .. ")"
+end
+
+AutoFarmTab:Section(SlotLabel(), "8932620770")
+
+-- Slot select buttons (radio behavior)
+AutoFarmTab:Button({
+    Title = "Slot 1",
+    Description = "Slot 1",
+    CallBack = function()
+        ApplyAutoFarmSlot(1)
+        syde:Notify({ Title = "AutoFarm Slot", Content = "Selected Slot 1", Duration = 2 })
+        -- refresh section header (Syde usually doesn't support editing section text;
+        -- if it does, ignore. This is harmless.)
+        AutoFarmTab:Section(SlotLabel(), "8932620770")
+    end
+})
+
+AutoFarmTab:Button({
+    Title = "Slot 2",
+    Description = "Slot 2",
+    CallBack = function()
+        ApplyAutoFarmSlot(2)
+        syde:Notify({ Title = "AutoFarm Slot", Content = "Selected Slot 2", Duration = 2 })
+        AutoFarmTab:Section(SlotLabel(), "8932620770")
+    end
+})
+
+AutoFarmTab:Button({
+    Title = "Slot 3",
+    Description = "Slot 3",
+    CallBack = function()
+        ApplyAutoFarmSlot(3)
+        syde:Notify({ Title = "AutoFarm Slot", Content = "Selected Slot 3", Duration = 2 })
+        AutoFarmTab:Section(SlotLabel(), "8932620770")
+    end
+})
+
+-- (Optional) quick view of current X/Y
+do
+    local slot = tonumber(Config.AutoFarmSlot) or 1
+    local s = Config.AutoFarmSlots and Config.AutoFarmSlots[slot]
+    local x = s and s.X or (getgenv().AutoFarmEmptyLiveX or 900)
+    local y = s and s.Y or (getgenv().AutoFarmEmptyLiveY or 700)
+
+    AutoFarmTab:Button({
+        Title = "Show selected slot",
+        Description = "Shows current selected slow",
+        CallBack = function()
+            local slotNow = tonumber(Config.AutoFarmSlot) or 1
+            local ss = Config.AutoFarmSlots and Config.AutoFarmSlots[slotNow]
+            local xx = ss and ss.X or (getgenv().AutoFarmEmptyLiveX or 900)
+            local yy = ss and ss.Y or (getgenv().AutoFarmEmptyLiveY or 700)
+            print(string.format("[AutoFarm] Slot %d -> EMPTY_LIVE_X=%s, EMPTY_LIVE_Y=%s", slotNow, tostring(xx), tostring(yy)))
+            syde:Notify({ Title = "AutoFarm XY", Content = "Slot " .. slotNow .. " -> " .. xx .. ", " .. yy, Duration = 3 })
+        end
+    })
+end
+
+AutoFarmTab:Section("Enable", "8932620770")
+
+AutoFarmTab:Toggle({
+    Title = "Enable Auto Farm",
     Value = Config.SpeedHubEnabled,
     Config = false,
     CallBack = function(v)
@@ -1390,22 +1561,35 @@ table.sort(sortedDemons)
 
 DemonTab:Section('Blood Demon Arts', '8932620770')
 for _, demonName in ipairs(sortedDemons) do
+    local data = Config.Demons[demonName]
+
     DemonTab:CreateSlider({
         Title = demonName,
         Sliders = {
             {
-                Title = 'Reaction %',
+                Title = "Reaction %",
                 Range = {1, 99},
                 Increment = 1,
-                StarterValue = Config.Demons[demonName],
-                CallBack = function(v) 
-                    Config.Demons[demonName] = v 
-                    SaveManager:Save() -- Auto Save
+                StarterValue = data.ReactionPct,
+                CallBack = function(v)
+                    data.ReactionPct = v
+                    SaveManager:Save()
+                end
+            },
+            {
+                Title = "Range",
+                Range = {6, 30},
+                Increment = 1,
+                StarterValue = data.Range,
+                CallBack = function(v)
+                    data.Range = v
+                    SaveManager:Save()
                 end
             }
         }
     })
 end
+
 
 -- [[ SKILL SLIDERS ]]
 -- Sort alphabetical for cleanliness
@@ -1803,7 +1987,7 @@ local function OnAnimationPlayed(char, track)
     local variantKey = GetVariantKey(char) -- Returns "Water", "Akaza", etc.
     
     local breathConfig = Config.Breaths[variantKey]
-    local demonPct = Config.Demons[variantKey] -- Single value slider for demons
+local demonData = Config.Demons[variantKey]
 
     -- Defaults
     local reaction = 20
@@ -1815,11 +1999,12 @@ local function OnAnimationPlayed(char, track)
         reaction = breathConfig.SkillPct
         range = breathConfig.Range
         color = breathConfig.Color
-    elseif demonPct then
-    reaction = demonPct
-    range = Config.DemonRange
+    elseif demonData then
+    reaction = demonData.ReactionPct or reaction
+    range = demonData.Range or range
     color = Color3.fromRGB(150, 0, 0)
 end
+
 
 
     -- ✅ Prefer resolved name, fallback to track.Name
@@ -1838,9 +2023,10 @@ end
         if breathConfig then
             reaction = breathConfig.CombatPct
             color = Color3.fromRGB(255, 100, 100) -- Redish for combat
-        elseif demonPct then
-            reaction = demonPct -- Demons use the same slider for M1s usually
-            color = Color3.fromRGB(150, 0, 0) 
+        elseif demonData then
+    reaction = demonData.ReactionPct or 20
+    range = demonData.Range or range
+    color = Color3.fromRGB(150, 0, 0)
         else
             reaction = 20 -- Fallback M1
             color = Color3.fromRGB(255, 100, 100)
