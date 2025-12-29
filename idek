@@ -1816,11 +1816,11 @@ local function OnAnimationPlayed(char, track)
         range = breathConfig.Range
         color = breathConfig.Color
     elseif demonPct then
-        -- [[ NEW: Apply Demon Settings ]]
-        reaction = demonPct
-        range = 14 -- Standard range for demons
-        color = Color3.fromRGB(150, 0, 0) -- Dark Red for Demon Arts
-    end
+    reaction = demonPct
+    range = Config.DemonRange
+    color = Color3.fromRGB(150, 0, 0)
+end
+
 
     -- ✅ Prefer resolved name, fallback to track.Name
     local rawName = track.Name
