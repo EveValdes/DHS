@@ -156,7 +156,7 @@ local LastSkillParried = "None"
 -- [3] SAVE MANAGER
 -- ==============================================================================
 local SaveManager = {}
-local FileName = "ParryHub_Config_Auto.json"
+local FileName = "ZoneConfig.json"
 
 function SaveManager:Save()
     if writefile then
