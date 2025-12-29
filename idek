@@ -31,7 +31,6 @@ local success, syde = pcall(function()
 end)
 
 if not success or not syde then
-    warn("Failed to load Syde Library. Trying backup link...")
     syde = loadstring(game:HttpGet("https://raw.githubusercontent.com/1201for/Syde/main/source.lua"))()
 end
 
@@ -70,7 +69,7 @@ local Config = {
     
     -- Global Defaults
     GlobalRange = 20,     -- Default range if not specified
-    NPC = { Range = 18, ReactionPct = 19, Color = Color3.fromRGB(255, 255, 0) },
+    NPC = { Range = 18, ReactionPct = 25, Color = Color3.fromRGB(255, 255, 0) },
 
     
     -- [[ BREATH SPECIFIC CONFIGS (Baselines) ]]
@@ -174,7 +173,11 @@ function SaveManager:Save()
     local dataToSave = {
         AwarenessRange = Config.AwarenessRange,
         SpeedHubEnabled = Config.SpeedHubEnabled,
+		NPCReactionTiming = Config.NPC and Config.NPC.ReactionPct or 19,
+
+		
 		DemonAutoFarmEnabled = (getgenv().DemonAutoFarmEnabled == true),
+
 
 
 		AutoFarmSlot = Config.AutoFarmSlot,
@@ -264,6 +267,13 @@ function SaveManager:Load()
                     end
                 end
             end
+
+			-- NPC reaction timing
+if result.NPCReactionTiming ~= nil then
+    Config.NPC = Config.NPC or {}
+    Config.NPC.ReactionPct = tonumber(result.NPCReactionTiming) or (Config.NPC.ReactionPct or 19)
+end
+
 
             -- SpeedHub toggle
             if result.SpeedHubEnabled ~= nil then
@@ -666,11 +676,7 @@ end
 			local placeMatch = (game.PlaceId == TARGET_ID)
 			local gameMatch = (game.GameId == TARGET_ID)
 
-			print(
-				"[DEBUG] Loop tick | isEnabled() =", isEnabled(),
-				"| PlaceId match =", placeMatch,
-				"| GameId match =", gameMatch
-			)
+			
 
 			-- run if either PlaceId OR GameId matches the target
 			if placeMatch or gameMatch then
@@ -1319,8 +1325,7 @@ local function SetupFailureDetection(char)
             -- Round loss for clean print
             lossAmount = math.floor(lossAmount or 0)
             
-            print(string.format("❌ [Parry Failed] Skill: %s | Verdict: %s | Cause: %s (-%d)", 
-                LastSkillParried, verdict, reason, lossAmount))
+           
         end
     end
 
@@ -1469,7 +1474,6 @@ do
             local ss = Config.AutoFarmSlots and Config.AutoFarmSlots[slotNow]
             local xx = ss and ss.X or (getgenv().AutoFarmEmptyLiveX or 900)
             local yy = ss and ss.Y or (getgenv().AutoFarmEmptyLiveY or 700)
-            print(string.format("[AutoFarm] Slot %d -> EMPTY_LIVE_X=%s, EMPTY_LIVE_Y=%s", slotNow, tostring(xx), tostring(yy)))
             syde:Notify({ Title = "AutoFarm XY", Content = "Slot " .. slotNow .. " -> " .. xx .. ", " .. yy, Duration = 3 })
         end
     })
@@ -1556,6 +1560,24 @@ MainTab:CreateSlider({
         }
     }
 })
+
+MainTab:CreateSlider({
+    Title = "NPC Reaction Timing",
+    Sliders = {
+        {
+            Title = "Reaction %",
+            Range = {1, 99},
+            Increment = 1,
+            StarterValue = (Config.NPC and Config.NPC.ReactionPct) or 19,
+            CallBack = function(v)
+                Config.NPC = Config.NPC or {}
+                Config.NPC.ReactionPct = v
+                SaveManager:Save()
+            end
+        }
+    }
+})
+
 
 -- [[ BREATH SLIDERS ]]
 for breathName, data in pairs(Config.Breaths) do
@@ -1886,7 +1908,6 @@ task.spawn(function()
 
         -- [[ SINGLE EXECUTION CHECK ]] --
 if getgenv().SpeedHubXLoaded then 
-    warn("Speed Hub X is already running! Aborting new execution.")
     return 
 end
 
@@ -1931,7 +1952,10 @@ local success, err = pcall(function()
     local W_SPAM_SPEED = 0.08
 
     -- Fixed click positions
-    local CLICK_X, CLICK_Y = 771, 650
+    local CLICK_X2, CLICK_Y2 = 771, 650
+	-- Backwards-compat for any older code still using CLICK_X / CLICK_Y
+local CLICK_X, CLICK_Y = CLICK_X2, CLICK_Y2
+
     local VE_TOP_X, VE_TOP_Y = 1889, 50
     local EMPTY_LIVE_X, EMPTY_LIVE_Y = 900, 629
 
@@ -2043,6 +2067,23 @@ local success, err = pcall(function()
         task.wait()
         VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
     end
+
+	local function VirtualClickAtScaled(x, y, baseW, baseH)
+    baseW = baseW or 1920
+    baseH = baseH or 1080
+
+    local cam = workspace.CurrentCamera
+    if not cam then
+        return VirtualClickAt(x, y)
+    end
+
+    local vp = cam.ViewportSize
+    local sx = math.floor((x / baseW) * vp.X)
+    local sy = math.floor((y / baseH) * vp.Y)
+
+    VirtualClickAt(sx, sy)
+end
+
 
     local function VirtualClickAtMouse()
         local mouseLocation = UserInputService:GetMouseLocation()
@@ -2440,16 +2481,7 @@ task.spawn(function()
         local now = os.clock()
 
         -- ---- DEBUG HEARTBEAT ----
-        if (now - lastDebug) >= DEBUG_INTERVAL then
-            lastDebug = now
-            print(string.format(
-                "[V LOOP DEBUG] enabled=%s | placeId=%d | correctPlace=%s | cooldown=%.2f",
-                tostring(enabled),
-                game.PlaceId,
-                tostring(game.PlaceId == TARGET_PLACE_ID),
-                now - lastFire
-            ))
-        end
+    
 
         -- ---- HARD GATES ----
         if not enabled then
@@ -2473,7 +2505,7 @@ task.spawn(function()
 
         VirtualPressKey(Enum.KeyCode.V, 0.05)
         task.wait(0.15)
-        VirtualClickAt(CLICK_X, CLICK_Y)
+VirtualClickAtScaled(CLICK_X2, CLICK_Y2)
     end
 
 end)
