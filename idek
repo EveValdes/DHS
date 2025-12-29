@@ -2825,11 +2825,18 @@ end
         -- Just ensuring cleanName is correct
         
     elseif catName == "NPC" then
-        reaction = Config.NPC.ReactionPct
-        range = Config.NPC.Range
-        color = Config.NPC.Color
-        cleanName = "NPC Attack"
+    -- Only react to NPC animations that contain "swing" (case-insensitive)
+    local nm = (track.Name or "")
+    if not nm:lower():find("swing", 1, true) then
+        return
     end
+
+    reaction = Config.NPC.ReactionPct
+    range = Config.NPC.Range
+    color = Config.NPC.Color
+    cleanName = "NPC Swing"
+end
+
 
     local sessionSettings = {
         Range = range,
