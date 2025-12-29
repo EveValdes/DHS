@@ -97,19 +97,19 @@ CombatIgnoreExact = {
     
     -- [[ BREATH SPECIFIC CONFIGS (Baselines) ]]
     Breaths = {
-        ["Water"]     = { SkillPct = 15, CombatPct = 20, Range = 12, Color = Color3.fromRGB(137, 231, 255) },
-        ["Thunder"]   = { SkillPct = 10, CombatPct = 18, Range = 12, Color = Color3.fromRGB(255, 240, 103) },
-        ["Flame"]     = { SkillPct = 15, CombatPct = 20, Range = 12, Color = Color3.fromRGB(255, 175, 70) },
-        ["Wind"]      = { SkillPct = 12, CombatPct = 18, Range = 12, Color = Color3.fromRGB(122, 255, 69) },
-        ["Mist"]      = { SkillPct = 15, CombatPct = 20, Range = 12, Color = Color3.fromRGB(173, 227, 231) },
-        ["Insect"]    = { SkillPct = 15, CombatPct = 20, Range = 12, Color = Color3.fromRGB(151, 147, 255) },
-        ["Beast"]     = { SkillPct = 15, CombatPct = 20, Range = 12, Color = Color3.fromRGB(110, 177, 160) },
-        ["Sound"]     = { SkillPct = 15, CombatPct = 20, Range = 12, Color = Color3.fromRGB(165, 222, 255) },
-        ["Snake"]     = { SkillPct = 12, CombatPct = 18, Range = 12, Color = Color3.fromRGB(62, 121, 39) },
-        ["Flower"]    = { SkillPct = 15, CombatPct = 20, Range = 12, Color = Color3.fromRGB(233, 125, 179) },
-        ["Love"]      = { SkillPct = 15, CombatPct = 20, Range = 16, Color = Color3.fromRGB(251, 135, 255) },
-        ["Stone"]     = { SkillPct = 18, CombatPct = 22, Range = 16, Color = Color3.fromRGB(124, 124, 124) },
-        ["Breathless"]= { SkillPct = 15, CombatPct = 20, Range = 10, Color = Color3.fromRGB(124, 0, 0) },
+        ["Water"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(137, 231, 255) },
+        ["Thunder"]   = { SkillPct = 10, CombatPct = 18, Range = 18, Color = Color3.fromRGB(255, 240, 103) },
+        ["Flame"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(255, 175, 70) },
+        ["Wind"]      = { SkillPct = 12, CombatPct = 18, Range = 18, Color = Color3.fromRGB(122, 255, 69) },
+        ["Mist"]      = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(173, 227, 231) },
+        ["Insect"]    = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(151, 147, 255) },
+        ["Beast"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(110, 177, 160) },
+        ["Sound"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(165, 222, 255) },
+        ["Snake"]     = { SkillPct = 12, CombatPct = 18, Range = 18, Color = Color3.fromRGB(62, 121, 39) },
+        ["Flower"]    = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(233, 125, 179) },
+        ["Love"]      = { SkillPct = 15, CombatPct = 20, Range = 22, Color = Color3.fromRGB(251, 135, 255) },
+        ["Stone"]     = { SkillPct = 18, CombatPct = 22, Range = 22, Color = Color3.fromRGB(124, 124, 124) },
+        ["Breathless"]= { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(124, 0, 0) },
     },
 
     Demons = {
