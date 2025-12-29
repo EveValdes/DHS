@@ -1,0 +1,2024 @@
+-- ==============================================================================
+-- [0] SAFE LOAD CHECK (MENU-SAFE)
+-- j==============================================================================
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+    LocalPlayer = Players.LocalPlayer
+end
+
+-- Do NOT hard-wait for Character/HRP here (menu place may not have one yet).
+local function GetCharacterParts()
+    local char = LocalPlayer.Character
+    if not char then return nil, nil, nil end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    return char, hum, hrp
+end
+
+
+-- ==============================================================================
+-- [1] LOAD LIBRARY (SYDE)
+-- ==============================================================================
+local success, syde = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/essencejs/syde/refs/heads/main/source", true))()
+end)
+
+if not success or not syde then
+    warn("Failed to load Syde Library. Trying backup link...")
+    syde = loadstring(game:HttpGet("https://raw.githubusercontent.com/1201for/Syde/main/source.lua"))()
+end
+
+if not syde then return warn("Both library links failed.") end
+
+-- ==============================================================================
+-- [2] SERVICES & CONFIG
+-- ==============================================================================
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+
+local BlockRemote = ReplicatedStorage:WaitForChild("EVENTS"):WaitForChild("Block")
+
+-- [[ CONFIGURATION ]] --
+local Config = {
+    ParryEnabled = true,
+    ESPEnabled = true,
+    FacingDot = 0.2,      -- 0.5 = 45 degrees
+    AwarenessRange = 45,  -- Max distance to check for enemies
+    TargetFolder = Workspace:FindFirstChild("Live"),
+
+
+    SpeedHubEnabled = false,
+    
+    -- Global Defaults
+    GlobalRange = 20,     -- Default range if not specified
+    NPC = { Range = 18, ReactionPct = 25, Color = Color3.fromRGB(255, 255, 0) },
+
+    
+    -- [[ BREATH SPECIFIC CONFIGS (Baselines) ]]
+    Breaths = {
+        ["Water"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(137, 231, 255) },
+        ["Thunder"]   = { SkillPct = 10, CombatPct = 18, Range = 18, Color = Color3.fromRGB(255, 240, 103) },
+        ["Flame"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(255, 175, 70) },
+        ["Wind"]      = { SkillPct = 12, CombatPct = 18, Range = 18, Color = Color3.fromRGB(122, 255, 69) },
+        ["Mist"]      = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(173, 227, 231) },
+        ["Insect"]    = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(151, 147, 255) },
+        ["Beast"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(110, 177, 160) },
+        ["Sound"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(165, 222, 255) },
+        ["Snake"]     = { SkillPct = 12, CombatPct = 18, Range = 18, Color = Color3.fromRGB(62, 121, 39) },
+        ["Flower"]    = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(233, 125, 179) },
+        ["Love"]      = { SkillPct = 15, CombatPct = 20, Range = 25, Color = Color3.fromRGB(251, 135, 255) },
+        ["Stone"]     = { SkillPct = 18, CombatPct = 22, Range = 25, Color = Color3.fromRGB(124, 124, 124) },
+        ["Breathless"]= { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(124, 0, 0) },
+    },
+
+    Demons = {
+        ["Hantengu"] = 20,
+        ["Akaza"] = 20,
+        ["WindFan"] = 20, -- "Wind Fan" in name, key is likely "WindFan" or "Wind Fan" depending on attribute. 
+        ["Wind Fan"] = 20, -- Added both just in case
+        ["Lightning"] = 20,
+        ["Sonic"] = 20,
+        ["Douma"] = 20,
+        ["Spike"] = 20,
+        ["Speed Augmentation"] = 20,
+        ["BloodScythe"] = 20, -- "Blood Scythe"
+        ["Blood Scythe"] = 20,
+        ["Obi"] = 20,
+        ["String"] = 20,
+        ["Enmu"] = 20,
+        ["Zohakuten"] = 20,
+        ["Staff"] = 20,
+        ["Biwa"] = 20,
+        ["Hairo"] = 20,
+        ["Gyokko"] = 20,
+        ["Hiasobi Temari"] = 20,
+        ["Arrow"] = 20,
+        ["Demon Flames"] = 20,
+        ["Muzan BDA"] = 20,
+        ["Suppressed Muzan"] = 20
+    },
+
+    -- [[ SKILL SPECIFIC CONFIGS ]]
+    -- Overrides breath defaults if the animation matches
+    Skills = {
+        ["360 Slash"] = 15,
+        ["Dashing Draw"] = 15,
+        ["Dashing Strike"] = 15,
+        ["Leap Cut"] = 15,
+        ["Surface Slash"] = 15,
+        ["Thrust"] = 15,
+        ["Charged Strike"] = 18,
+        ["Dashing Vertical Strike"] = 15,
+        ["Fancy Draw"] = 15,
+        ["Reverse Deflecting Slash"] = 12,
+        ["Bisection"] = 15,
+        ["Deflecting Slash"] = 12,
+        ["Cleave"] = 15,
+        ["Shifting Thrust"] = 15,
+        ["Razor Slash"] = 15,
+        ["Left Blade Sweep"] = 15,
+        ["Right Blade Sweep"] = 15,
+        ["Blade Screen"] = 18,
+        ["Horizontal Cut"] = 15,
+        ["Low Sweep"] = 15,
+        ["Rising Vertical Slash"] = 15,
+        ["Whirling Rising Slash"] = 15,
+        ["Vertical Slash"] = 15,
+        ["Wheelcut"] = 18,
+        ["Left Ascending Slash"] = 15,
+        ["Right Ascending Slash"] = 15,
+        ["Skyscraper"] = 18,
+    },
+
+        ValidAnimationIds = {},
+
+    -- Resolved Skill Name <-> AnimationId maps
+    SkillAnimIdToName = {},  -- [animId] = "Skill Name"
+    SkillNameToAnimId = {},  -- ["Skill Name"] = animId
+}
+
+
+-- Tracker for notifications
+local LastParryTime = 0
+local LastSkillParried = "None"
+
+-- ==============================================================================
+-- [3] SAVE MANAGER
+-- ==============================================================================
+local SaveManager = {}
+local FileName = "ParryHub_Config_Auto.json"
+
+function SaveManager:Save()
+    if writefile then
+        local dataToSave = {
+            AwarenessRange = Config.AwarenessRange,
+            SpeedHubEnabled = Config.SpeedHubEnabled, -- NEW (can be anywhere)
+
+            Breaths = {},
+            Demons = Config.Demons, -- NEW
+            Skills = Config.Skills, -- <-- FIX: comma was missing
+        }
+
+        for name, data in pairs(Config.Breaths) do
+            dataToSave.Breaths[name] = {
+                SkillPct = data.SkillPct,
+                CombatPct = data.CombatPct,
+                Range = data.Range
+            }
+        end
+
+        writefile(FileName, HttpService:JSONEncode(dataToSave))
+    end
+end
+
+
+
+
+function SaveManager:Load()
+    if isfile and isfile(FileName) then
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(readfile(FileName))
+        end)
+        
+        if success and result then
+            if result.AwarenessRange then Config.AwarenessRange = result.AwarenessRange end
+            
+            if result.Breaths then
+                for name, savedData in pairs(result.Breaths) do
+                    if Config.Breaths[name] then
+                        Config.Breaths[name].SkillPct = savedData.SkillPct or Config.Breaths[name].SkillPct
+                        Config.Breaths[name].CombatPct = savedData.CombatPct or Config.Breaths[name].CombatPct
+                        Config.Breaths[name].Range = savedData.Range or Config.Breaths[name].Range
+                    end
+                end
+            end
+
+            if result.SpeedHubEnabled ~= nil then
+    Config.SpeedHubEnabled = result.SpeedHubEnabled
+end
+
+
+            -- [[ NEW: Load Demons ]]
+            if result.Demons then
+                for name, pct in pairs(result.Demons) do
+                    if Config.Demons[name] then
+                        Config.Demons[name] = pct
+                    end
+                end
+            end
+
+            if result.Skills then
+                for name, pct in pairs(result.Skills) do
+                    if Config.Skills[name] then
+                        Config.Skills[name] = pct
+                    end
+                end
+            end
+        end
+    end
+end
+
+
+
+getgenv().SpeedHubEnabled = getgenv().SpeedHubEnabled or false
+getgenv().SpeedHubLoaded = getgenv().SpeedHubLoaded or false
+
+local AutoParryBeforeSpeedHub = nil
+
+
+local function LoadSpeedHub()
+    if getgenv().SpeedHubLoaded then return end
+    getgenv().SpeedHubLoaded = true
+
+    task.spawn(function()
+-- Print a message to the console for troubleshooting
+
+-- Load and execute the script
+local success, err = pcall(function()
+	local Players = game:GetService("Players")
+	local TweenService = game:GetService("TweenService")
+	local RunService = game:GetService("RunService")
+	local UserInputService = game:GetService("UserInputService")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local VirtualInputManager = game:GetService("VirtualInputManager")
+
+	local player = Players.LocalPlayer
+
+	-- ===== SETTINGS =====
+	local LIVE_FOLDER = workspace:WaitForChild("Live")
+	local NPC_PREFIX = "NPC_"
+
+	-- Combat (hover/lock)
+	local COMBAT_HEIGHT = 10
+	local COMBAT_BACK_OFFSET = 0
+	local COMBAT_TWEEN_TIME = 0.07
+
+	-- E equip control
+	local ePressedEver = false
+	local lastEPress = 0
+
+	-- LeftAlt spam control
+	local lastLeftAltPress = 0
+
+	-- BlueFlower: press A once after FIRST teleport ever
+	local pressedAAfterFirstBlueFlowerTeleport = false
+
+	-- Spam rates (ONLY during combat lock)
+	local CLICK_SPEED = 0.1
+	local W_SPAM_SPEED = 0.08
+
+	-- Fixed click positions
+	local CLICK_X, CLICK_Y = 814, 631
+	local VE_TOP_X, VE_TOP_Y = 1889, 50
+	local EMPTY_LIVE_X, EMPTY_LIVE_Y = 900, 700
+
+	-- Intervals
+	local VILLAGER_ESCORT_INTERVAL = 2
+
+	-- V + click routine timings
+	local WAIT_BEFORE_V = 5
+	local WAIT_AFTER_CLICK = 20 -- hard loop every 10 seconds
+
+	-- ===== STATE =====
+-- GLOBAL FLAG CONTROLLED BY SCRIPT 2
+-- GLOBAL FLAG CONTROLLED BY SCRIPT 2 (DO NOT RESET HERE)
+local function isEnabled()
+    return getgenv().SpeedHubEnabled == true
+end
+
+
+
+	local lockConn: RBXScriptConnection? = nil
+	local inCombatLock = false
+
+	-- Auto-pause when no non-human NPCs exist (combat finished)
+local autoPaused = false
+local autoPauseReason = ""
+
+local function isRunning(): boolean
+	return isEnabled() and (not autoPaused)
+end
+
+local function setAutoPaused(state: boolean, reason: string?)
+	if autoPaused == state then return end
+	autoPaused = state
+	autoPauseReason = state and (reason or "AutoPaused") or ""
+	if autoPaused then
+	else
+	end
+end
+
+
+	local currentCombatNPC: Model? = nil
+
+	-- ===== CHARACTER =====
+	local LOADING_PLACE_ID = 11641576792
+
+	local function getCharacter()
+		-- loading/menu place → no character exists
+		if game.PlaceId == LOADING_PLACE_ID then
+			return nil, nil, nil
+		end
+
+		local character = player.Character or player.CharacterAdded:Wait()
+		local humanoid = character:WaitForChild("Humanoid")
+		local hrp = character:WaitForChild("HumanoidRootPart")
+
+		return character, humanoid, hrp
+	end
+
+	local character, humanoid, hrp
+
+	if game.PlaceId ~= LOADING_PLACE_ID then
+		character, humanoid, hrp = getCharacter()
+	end
+
+	player.CharacterAdded:Connect(function(char)
+    task.defer(function()
+        local h = char:WaitForChild("Humanoid")
+        local r = char:WaitForChild("HumanoidRootPart")
+        character, humanoid, hrp = char, h, r
+
+        -- Hard teardown any lock state
+        stopLock()
+        inCombatLock = false
+        currentCombatNPC = nil
+
+        -- Clear cache for the new humanoid (old one is irrelevant)
+        moveCacheByHumanoid[humanoid] = nil
+
+        -- Make sure we are not leaving movement "locked"
+        setMovementLocked(false)
+
+        -- Re-cache after the game sets real movement values
+        task.delay(1, function()
+            if humanoid and humanoid.Parent then
+                cacheMoveDefaults(humanoid, true)
+            end
+        end)
+    end)
+end)
+
+
+
+	local function getModelPart(model: Model): BasePart?
+		if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+			return model.PrimaryPart
+		end
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") then
+				return d
+			end
+		end
+		return nil
+	end
+
+	-- ===== Movement control =====
+	local function stopLock()
+		if lockConn then
+			lockConn:Disconnect()
+			lockConn = nil
+		end
+		if inCombatLock then
+			inCombatLock = false
+		end
+	end
+
+-- Cache per-humanoid so respawns don’t reuse stale values
+local moveCacheByHumanoid = setmetatable({}, { __mode = "k" })
+
+local function cacheMoveDefaults(h: Humanoid, force: boolean?)
+    if not h then return end
+
+    -- If not forcing, don't overwrite an existing cache
+    if moveCacheByHumanoid[h] and not force then
+        return
+    end
+
+    -- Avoid caching during the "spawn init" window where speed is often 0
+    if h.WalkSpeed <= 0 then
+        return
+    end
+
+    moveCacheByHumanoid[h] = {
+        WalkSpeed = h.WalkSpeed,
+        UseJumpPower = h.UseJumpPower,
+        JumpPower = h.JumpPower,
+        JumpHeight = h.JumpHeight,
+        AutoRotate = h.AutoRotate,
+    }
+end
+
+
+local function restoreMoveDefaults(h: Humanoid)
+    local c = h and moveCacheByHumanoid[h]
+    if not h or not c then
+        -- If we never cached properly, do NOT force bad values back in
+        return
+    end
+
+    h.WalkSpeed = c.WalkSpeed
+    h.AutoRotate = c.AutoRotate
+
+    if c.UseJumpPower then
+        h.JumpPower = c.JumpPower
+    else
+        h.JumpHeight = c.JumpHeight
+    end
+end
+
+
+local function setMovementLocked(isLocked: boolean)
+    if not humanoid then return end
+
+    if isLocked then
+        -- cache RIGHT BEFORE locking (when speed is valid)
+        cacheMoveDefaults(humanoid, true)
+
+        humanoid.AutoRotate = false
+        humanoid.WalkSpeed = 0
+
+        if humanoid.UseJumpPower then
+            humanoid.JumpPower = 0
+        else
+            humanoid.JumpHeight = 0
+        end
+    else
+        restoreMoveDefaults(humanoid)
+    end
+end
+
+
+
+task.spawn(function()
+        while true do
+            task.wait(0.1)
+            if not isEnabled() then
+                stopLock()
+                setMovementLocked(false)
+            end
+        end
+    end)
+
+	-- ===== Virtual input helpers =====
+	local function VirtualPressKey(keyCode: Enum.KeyCode, pressTime: number?)
+		pressTime = pressTime or 0.04
+		VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+		task.wait(pressTime)
+		VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+	end
+
+	local function VirtualClickAt(x: number, y: number)
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		task.wait()
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	end
+
+	local function VirtualClickAtMouse()
+		local mouseLocation = UserInputService:GetMouseLocation()
+		VirtualInputManager:SendMouseButtonEvent(mouseLocation.X, mouseLocation.Y, 0, true, game, 0)
+		task.wait()
+		VirtualInputManager:SendMouseButtonEvent(mouseLocation.X, mouseLocation.Y, 0, false, game, 0)
+	end
+
+	-- ===== Missions =====
+	local function HasMissionsFolder(): boolean
+		return ReplicatedStorage:FindFirstChild("missions") ~= nil
+	end
+
+	local function getMissionNameStringValue(): StringValue?
+		local missions = ReplicatedStorage:FindFirstChild("missions")
+		if not missions then
+			return nil
+		end
+		for _, d in ipairs(missions:GetDescendants()) do
+			if d:IsA("StringValue") and d.Name == "name" then
+				return d
+			end
+		end
+		return nil
+	end
+
+	local function getMissionName(): string
+		local sv = getMissionNameStringValue()
+		return sv and sv.Value or ""
+	end
+
+	-- ===== NPC helpers =====
+	local function getNPCPrimaryPart(model: Model): BasePart?
+		if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+			return model.PrimaryPart
+		end
+		local hrp2 = model:FindFirstChild("HumanoidRootPart")
+		if hrp2 and hrp2:IsA("BasePart") then
+			return hrp2
+		end
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") then
+				return d
+			end
+		end
+		return nil
+	end
+
+	local function isNPCModel(inst: Instance): boolean
+		return inst
+			and inst:IsA("Model")
+			and inst.Name:sub(1, #NPC_PREFIX) == NPC_PREFIX
+			and inst:IsDescendantOf(LIVE_FOLDER)
+	end
+
+	local function findAnyNonHumanNPC(): Model?
+		for _, m in ipairs(LIVE_FOLDER:GetDescendants()) do
+			if isNPCModel(m) then
+				if m:GetAttribute("Race") ~= "Human" then
+					if getNPCPrimaryPart(m) then
+						return m
+					end
+				end
+			end
+		end
+		return nil
+	end
+
+	-- ===== CFrame positioning (combat hover) =====
+	local function computeHoverCFrame(npcPart: BasePart, height: number, backOffset: number): CFrame
+		local base = npcPart.CFrame
+		local pos = base.Position + base.UpVector * height + base.LookVector * backOffset
+		return CFrame.lookAt(pos, npcPart.Position)
+	end
+
+	local function tweenHRPTo(targetCF: CFrame, tweenTime: number)
+		if not hrp or not hrp.Parent then return end
+		local t = TweenService:Create(
+			hrp,
+			TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ CFrame = targetCF }
+		)
+		t:Play()
+		t.Completed:Wait()
+	end
+
+	-- ===== WeaponData detection (LATCH) =====
+	local function weaponDataExists(): boolean
+		-- 1) The path you were using
+		local live = workspace:FindFirstChild("Live")
+		local lp = live and live:FindFirstChild("LocalPlayer")
+		if lp and lp:FindFirstChild("WeaponData") then
+			return true
+		end
+
+		-- 2) Anywhere under the actual Player instance
+		if player:FindFirstChild("WeaponData", true) then
+			return true
+		end
+
+		-- 3) Anywhere under character (just in case)
+		if player.Character and player.Character:FindFirstChild("WeaponData", true) then
+			return true
+		end
+
+		return false
+	end
+
+	-- If WeaponData ever gets added later, latch immediately forever
+	do
+		local function latchIfWeaponData(inst: Instance)
+			if inst and inst.Name == "WeaponData" then
+				ePressedEver = true
+			end
+		end
+
+		-- Existing?
+		if weaponDataExists() then
+			ePressedEver = true
+		end
+
+		-- Future adds
+		player.DescendantAdded:Connect(latchIfWeaponData)
+		if workspace then
+			workspace.DescendantAdded:Connect(latchIfWeaponData)
+		end
+	end
+
+	
+	-- ===== LeftAlt spam loop (every 0.6 seconds) =====
+	task.spawn(function()
+		while true do
+			task.wait(0.05)
+
+			if not isEnabled() then
+				continue
+			end
+
+			local now = os.clock()
+			if (now - lastLeftAltPress) >= 0.6 then
+				lastLeftAltPress = now
+				VirtualPressKey(Enum.KeyCode.LeftAlt, 0.05)
+			end
+		end
+	end)
+
+	-- ===== PlaceId/GameId-based spam click (more reliable) =====
+	local TARGET_ID = 11641576792
+
+	task.spawn(function()
+		-- wait for game to finish loading so IDs/UI are stable
+		if not game:IsLoaded() then
+			game.Loaded:Wait()
+		end
+		task.wait(1)
+
+
+		while true do
+			if not isEnabled() then
+				task.wait(0.2)
+				continue
+			end
+
+			local placeMatch = (game.PlaceId == TARGET_ID)
+			local gameMatch = (game.GameId == TARGET_ID)
+
+			print(
+				"[DEBUG] Loop tick | isEnabled() =", isEnabled(),
+				"| PlaceId match =", placeMatch,
+				"| GameId match =", gameMatch
+			)
+
+			-- run if either PlaceId OR GameId matches the target
+			if placeMatch or gameMatch then
+				VirtualClickAt(EMPTY_LIVE_X, EMPTY_LIVE_Y)
+				task.wait(0.15)
+			else
+				task.wait(0.5)
+			end
+		end
+	end)
+
+	-- ===== Villager Escort / Stalked Logic (Return to Menu Spam) =====
+	task.spawn(function()
+		-- Pre-load the RemoteFunction
+		local ReturnRemote = nil
+		local events = ReplicatedStorage:WaitForChild("EVENTS", 5)
+		if events then
+			ReturnRemote = events:WaitForChild("ReturnToMainMenu", 5)
+		end
+
+		while true do
+			-- Loop every 1 second as requested
+			task.wait(1)
+
+			if not isEnabled() then continue end
+			if not HasMissionsFolder() then continue end
+
+			local missionName = getMissionName()
+			
+			-- Runs for either "Villager Escort" OR "Stalked"
+			if missionName == "Villager Escort" or missionName == "Stalked" then
+				
+				-- Ensure we aren't stuck in combat mode from a previous mission
+				if inCombatLock then
+					stopLock()
+					setMovementLocked(false)
+				end
+
+				-- [[ NEW: SPAM RETURN TO MENU ]] --
+				if ReturnRemote then
+					-- Using pcall to prevent crashes if the server rejects the invoke
+					pcall(function()
+						ReturnRemote:InvokeServer()
+					end)
+				end
+			end
+		end
+	end)
+
+	-- ===== Number key spam (1–6) ONLY during combat =====
+task.spawn(function()
+    local KEY_SPAM_DELAY = 0.12 -- adjust speed here
+    local numberKeys = {
+        Enum.KeyCode.Seven,
+        Enum.KeyCode.Eight,
+
+    }
+
+    while true do
+        task.wait(KEY_SPAM_DELAY)
+
+        -- MUST be isEnabled() AND in combat
+        if not isEnabled() or not inCombatLock then
+            continue
+        end
+
+        for _, key in ipairs(numberKeys) do
+            -- stop immediately if combat ends mid-loop
+            if not inCombatLock or not isEnabled() then
+                break
+            end
+
+            VirtualPressKey(key, 0.03)
+            task.wait(0.02)
+        end
+    end
+end)
+
+
+	-- ===== Medicine Retrival: BlueFlower only (teleport once per flower, stay until gone) =====
+	-- ===== Medicine Retrival: BlueFlower only (teleport once per flower, stay until gone) =====
+	task.spawn(function()
+		local CLICK_INTERVAL = 0.08
+		local PER_FLOWER_TIMEOUT = 20 -- seconds safety so it can't hang forever
+		local SPAM_X, SPAM_Y = 961, 767
+
+		while true do
+			task.wait(0.2)
+
+			if not isEnabled() then
+				continue
+			end
+
+			if not HasMissionsFolder() then
+				continue
+			end
+
+			if getMissionName() ~= "Medicine Retrival" then
+				continue
+			end
+
+			-- need character/hrp
+			if not hrp or not hrp.Parent then
+				if game.PlaceId ~= LOADING_PLACE_ID then
+					character, humanoid, hrp = getCharacter()
+				end
+				if not hrp then
+					continue
+				end
+			end
+
+			local thrown = workspace:FindFirstChild("Thrown")
+			if not thrown then
+				continue
+			end
+
+			-- don’t fight with combat hover while doing this
+			if inCombatLock then
+				stopLock()
+				setMovementLocked(false)
+			end
+
+			-- Find ONE BlueFlower, do it fully, then look for the next
+			local target: Model? = nil
+			for _, m in ipairs(thrown:GetChildren()) do
+				if m:IsA("Model") and m.Name == "BlueFlower" then
+					target = m
+					break
+				end
+			end
+
+			if not target then
+				continue
+			end
+
+			local part = getModelPart(target)
+			if not part then
+				continue
+			end
+
+			-- TELEPORT ONCE to this BlueFlower
+			do
+				local standPos = part.Position + Vector3.new(0, 2, 0) + (part.CFrame.LookVector * -2)
+				local faceCF = CFrame.lookAt(standPos, part.Position)
+				
+				-- [[ NEW: SPAM "A" BEFORE TELEPORTING ]] --
+				-- This runs right before the tween starts
+				for i = 1, 10 do
+					VirtualPressKey(Enum.KeyCode.A, 0.02)
+					task.wait(0.02)
+				end
+				
+				tweenHRPTo(faceCF, 0.12)
+			end
+
+			-- STAY here until this BlueFlower is gone, spamming fixed click position
+			local startT = os.clock()
+			while isEnabled()
+				and HasMissionsFolder()
+				and getMissionName() == "Medicine Retrival"
+				and hrp and hrp.Parent
+				and target.Parent == thrown
+				and part and part.Parent
+				and (os.clock() - startT) < PER_FLOWER_TIMEOUT
+			do
+				VirtualClickAt(SPAM_X, SPAM_Y)
+				task.wait(CLICK_INTERVAL)
+			end
+		end
+	end)
+
+
+	-- ===== Combat spam loop (ONLY while combat hover lock is isEnabled()) =====
+task.spawn(function()
+    local lastClick = 0
+    local lastW = 0
+
+    while true do
+        task.wait(0.01)
+
+        if not isEnabled() or not inCombatLock then
+            continue
+        end
+
+        local now = os.clock()
+
+        if (now - lastW) >= W_SPAM_SPEED then
+            lastW = now
+            VirtualPressKey(Enum.KeyCode.W, 0.03)
+        end
+
+        if (now - lastClick) >= CLICK_SPEED then
+            lastClick = now
+            VirtualClickAtMouse()
+        end
+    end
+end)
+
+
+	-- ===== V + fixed click routine (hard 10s cooldown) =====
+	-- ===== V + fixed click routine (hard 10s cooldown) + Anti-Stuck =====
+	task.spawn(function()
+		local lastFire = 0
+		local loopCount = 0 -- Counter for consecutive loops
+
+		while true do
+			task.wait(0.2)
+
+			if not isEnabled() then
+				loopCount = 0 -- Reset if disabled
+				continue
+			end
+
+			-- Enforce cooldown (changed from 15s to WAIT_AFTER_CLICK variable)
+			local now = os.clock()
+			if (now - lastFire) < WAIT_AFTER_CLICK then
+				continue
+			end
+
+			local missionName = ""
+			if HasMissionsFolder() then
+				missionName = getMissionName()
+			end
+
+			local isDesired = (missionName == "Villager Escort" or missionName == "Extermination")
+
+			-- This logic runs if we DO NOT have missions or if we are NOT on a desired mission
+			-- (Essentially the "idle" or "stuck" state handling)
+			if (not HasMissionsFolder()) or (not isDesired) then
+				if not inCombatLock then
+					lastFire = now
+					
+					-- Increment loop counter
+					loopCount = loopCount + 1
+					
+					-- [[ NEW: TELEPORT IF STUCK (5 Loops) ]] --
+					if loopCount >= 5 then
+						local walls = workspace:FindFirstChild("InvisibleWalls")
+						if walls then
+							-- Teleport to the first child found in the folder
+							local wall = walls:GetChildren()[1]
+							if wall and wall:IsA("BasePart") and hrp then
+								-- Teleport 5 studs above the wall to be safe
+								hrp.CFrame = wall.CFrame + Vector3.new(0, wall.Size.Y/2 + 5, 0)
+							end
+						end
+						loopCount = 0 -- Reset counter after teleport
+					end
+
+					VirtualPressKey(Enum.KeyCode.V, 0.05)
+					task.wait(0.2)
+					VirtualClickAt(CLICK_X, CLICK_Y)
+				end
+			else
+				-- If we ARE on a desired mission, reset the stuck counter
+				loopCount = 0
+			end
+		end
+	end)
+
+    local function fireCombatActivated()
+    local player = game:GetService("Players").LocalPlayer
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then return end
+
+    local combatTool = backpack:FindFirstChild("Combat")
+        or (player.Character and player.Character:FindFirstChild("Combat"))
+
+    if not combatTool then return end
+
+    local remote = combatTool:FindFirstChild("ToggleActivated")
+    if remote and remote:IsA("RemoteEvent") then
+        remote:FireServer(true)
+    end
+end
+
+
+	local function fireCombatRemote()
+		local tool = player.Backpack:FindFirstChild("Combat") or (player.Character and player.Character:FindFirstChild("Combat"))
+		if tool then
+			local remote = tool:FindFirstChild("ToggleEquip")
+			if remote and remote:IsA("RemoteEvent") then
+				remote:FireServer(true)
+			end
+		end
+	end
+
+	-- ===== Main loop (Extermination combat hover lock) =====
+	task.spawn(function()
+		-- Track the NPC we are currently ignoring due to the 5s timeout
+		local temporaryIgnoredNPC = nil 
+		
+		-- Particle tracking variables
+		local lastParticleTime = 0
+		local particleConnection: RBXScriptConnection? = nil
+		
+		-- [[ NEW: Equip Spam Timer ]] --
+		local lastEquipTime = 0
+
+		local function cleanupParticleTracking()
+			if particleConnection then
+				particleConnection:Disconnect()
+				particleConnection = nil
+			end
+		end
+
+		while true do
+			task.wait(0.12)
+
+			if not isEnabled() then
+				cleanupParticleTracking()
+				temporaryIgnoredNPC = nil
+				continue
+			end
+
+			-- Refresh on respawn
+			if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+				character, humanoid, hrp = getCharacter()
+			end
+
+			-- Check for missions folder
+			if not HasMissionsFolder() then
+				stopLock()
+				setMovementLocked(false)
+				currentCombatNPC = nil
+				cleanupParticleTracking()
+				temporaryIgnoredNPC = nil
+				continue
+			end
+
+			local missionName = getMissionName()
+
+			-- [[ STOP ALL COMBAT IF MISSION IS "At Ease Soldier! Soldier!" OR EMPTY ]] --
+			if missionName == "At Ease Soldier! Soldier!" or missionName == "" then
+				stopLock()
+				setMovementLocked(false)
+				currentCombatNPC = nil
+				cleanupParticleTracking()
+				temporaryIgnoredNPC = nil
+				continue -- Skip the rest of the loop (stops combat functions)
+			end
+
+			-- Extermination only: hover lock combat
+			if missionName == "Extermination" then
+				
+				-- If locked, keep lock active and spam equip
+				if inCombatLock then
+					-- [[ NEW: SPAM EQUIP EVERY 1 SECOND ]] --
+					if (os.clock() - lastEquipTime) >= 1 then
+						fireCombatRemote()
+						lastEquipTime = os.clock()
+					end
+					continue
+				end
+
+				-- 1. SEARCH FOR TARGET
+				local potentialTarget = nil
+				
+				for _, m in ipairs(LIVE_FOLDER:GetDescendants()) do
+					if isNPCModel(m) and m:GetAttribute("Race") ~= "Human" and getNPCPrimaryPart(m) then
+						local h = m:FindFirstChild("Humanoid")
+						if h and h.Health > 0 then
+							if m == temporaryIgnoredNPC then continue end
+							potentialTarget = m
+							break 
+						end
+					end
+				end
+
+				-- Fallback to ignored target if nothing else exists
+				if not potentialTarget and temporaryIgnoredNPC then
+					if temporaryIgnoredNPC.Parent and getNPCPrimaryPart(temporaryIgnoredNPC) then
+						local h = temporaryIgnoredNPC:FindFirstChild("Humanoid")
+						if h and h.Health > 0 then
+							potentialTarget = temporaryIgnoredNPC
+							temporaryIgnoredNPC = nil
+						end
+					end
+				end
+
+				if not potentialTarget then
+					stopLock()
+					setMovementLocked(false)
+					currentCombatNPC = nil
+					cleanupParticleTracking()
+					continue
+				end
+
+				-- New Target Found
+				currentCombatNPC = potentialTarget
+				local npcPart = getNPCPrimaryPart(currentCombatNPC)
+				
+				if not npcPart then
+					currentCombatNPC = nil
+					continue
+				end
+
+				-- Engage Lock
+				setMovementLocked(true)
+				tweenHRPTo(computeHoverCFrame(npcPart, COMBAT_HEIGHT, COMBAT_BACK_OFFSET), COMBAT_TWEEN_TIME)
+				stopLock()
+				inCombatLock = true
+				
+				-- [[ NEW: EQUIP IMMEDIATELY & RESET TIMER ]] --
+				fireCombatRemote()
+				lastEquipTime = os.clock()
+				
+				-- Reset tracking
+				lastParticleTime = os.clock()
+				cleanupParticleTracking()
+				
+				particleConnection = workspace.DescendantAdded:Connect(function(descendant)
+					if descendant:IsA("ParticleEmitter") then
+						local sourcePos = nil
+						if descendant.Parent:IsA("BasePart") then
+							sourcePos = descendant.Parent.Position
+						elseif descendant.Parent:IsA("Attachment") then
+							sourcePos = descendant.Parent.WorldPosition
+						end
+
+						if sourcePos and currentCombatNPC then
+							local root = getNPCPrimaryPart(currentCombatNPC)
+							if root then
+								local dist = (sourcePos - root.Position).Magnitude
+								if dist <= 15 then
+									lastParticleTime = os.clock()
+								end
+							end
+						end
+					end
+				end)
+
+				-- Start Lock Loop
+				lockConn = RunService.RenderStepped:Connect(function()
+					if not isEnabled() then return end
+					
+					if not currentCombatNPC or not currentCombatNPC:IsDescendantOf(LIVE_FOLDER) then 
+						stopLock()
+						setMovementLocked(false)
+						currentCombatNPC = nil
+						cleanupParticleTracking()
+						return 
+					end
+					
+					local npcHum = currentCombatNPC:FindFirstChild("Humanoid")
+					if not npcHum or npcHum.Health <= 0 then
+						stopLock()
+						setMovementLocked(false)
+						currentCombatNPC = nil
+						cleanupParticleTracking()
+						return 
+					end
+
+					if currentCombatNPC:GetAttribute("Race") == "Human" then return end
+
+					if (os.clock() - lastParticleTime) > 5 then
+						temporaryIgnoredNPC = currentCombatNPC
+						stopLock()
+						setMovementLocked(false)
+						currentCombatNPC = nil
+						cleanupParticleTracking()
+						return
+					end
+
+					local partNow = getNPCPrimaryPart(currentCombatNPC)
+					if partNow and hrp then
+						hrp.CFrame = computeHoverCFrame(partNow, COMBAT_HEIGHT, COMBAT_BACK_OFFSET)
+						hrp.AssemblyLinearVelocity = Vector3.zero
+						hrp.AssemblyAngularVelocity = Vector3.zero
+					end
+				end)
+
+				continue
+			end
+
+			stopLock()
+			setMovementLocked(false)
+			currentCombatNPC = nil
+			cleanupParticleTracking()
+			temporaryIgnoredNPC = nil
+		end
+	end)
+end)
+
+
+
+-- Check if the script executed successfully or encountered an error
+if success then
+else
+end
+
+    end)
+end
+
+local function ApplySpeedHubState(enabled)
+    -- Sync global
+    getgenv().SpeedHubEnabled = enabled
+    Config.SpeedHubEnabled = enabled
+
+    -- Disable / restore AutoParry cleanly
+    if enabled then
+        if AutoParryBeforeSpeedHub == nil then
+            AutoParryBeforeSpeedHub = Config.ParryEnabled
+        end
+        Config.ParryEnabled = false
+    else
+        if AutoParryBeforeSpeedHub ~= nil then
+            Config.ParryEnabled = AutoParryBeforeSpeedHub
+            AutoParryBeforeSpeedHub = nil
+        end
+    end
+
+    SaveManager:Save()
+
+    -- Load SpeedHub logic once
+    if enabled then
+        LoadSpeedHub()
+    end
+end
+
+
+
+SaveManager:Load()
+
+-- Apply saved SpeedHub state on load (this also loads SpeedHub if enabled)
+ApplySpeedHubState(Config.SpeedHubEnabled == true)
+
+
+-- ==============================================================================
+-- [HELPERS]
+-- ==============================================================================
+local function GetRoot(char)
+    return char.PrimaryPart or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function IsFacing(char, targetPos)
+    local root = GetRoot(char)
+    if not root then return false end
+    local origin = root.Position
+    local lookVector = root.CFrame.LookVector
+    local direction = (targetPos - origin).Unit
+    return lookVector:Dot(direction) > Config.FacingDot
+end
+
+local function IsPlayerBusyCombatAnim()
+    local combatScript = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("CombatScript")
+    if combatScript and getsenv and debug and debug.getupvalue then
+        local env = getsenv(combatScript)
+        if env then
+             local isAttacking = env.IsAttacking or env.Attacking
+             if isAttacking == true then return true end
+        end
+    end
+
+    local myChar = LocalPlayer.Character
+    if not myChar then return false end
+    local hum = myChar:FindFirstChild("Humanoid")
+    if not hum then return false end
+
+    for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
+        local nm = (t.Name or ""):lower()
+        if nm:find("swing") or nm:find("skill") or nm:find("breath") then
+            return true
+        end
+    end
+    return false
+end
+
+local function HasExternalHighlight(character)
+    if not character then return false end
+    for _, inst in ipairs(character:GetChildren()) do
+        if inst:IsA("Highlight") and not inst:GetAttribute("ParryHubOwned") and inst.Name ~= "ParryHub_HL" then
+            return true
+        end
+    end
+    return false
+end
+
+local function GetVariantKey(enemyChar)
+    if not enemyChar then return "None" end
+    
+    -- [[ NEW: Check BDA First ]]
+    local bda = enemyChar:GetAttribute("StyleBDA")
+    if bda ~= nil and tostring(bda) ~= "" then
+        return tostring(bda)
+    end
+
+    local breath = enemyChar:GetAttribute("Breath")
+    if breath ~= nil and tostring(breath) ~= "" then
+        return tostring(breath)
+    end
+    
+    return "None"
+end
+
+local function CountTable(t)
+    local c = 0
+    for _ in pairs(t) do c = c + 1 end
+    return c
+end
+-- SPEED HUB CONTROLLER
+
+
+-- ==============================================================================
+-- [FAILURE NOTIFICATION] (UPDATED)
+-- ==============================================================================
+local function SetupFailureDetection(char)
+    local hum = char:WaitForChild("Humanoid", 10)
+    if not hum then return end
+
+    -- Define Notification Logic
+    local function NotifyFail(reason, lossAmount)
+        local diff = tick() - LastParryTime
+        
+        -- Window: 1.0s after parry attempt
+        if diff < 1.0 then 
+            local verdict = "Unknown"
+            
+            if diff < 0.35 then
+                verdict = "Too Late (Hit during startup/lag)"
+            else
+                verdict = "Too Early (Block expired)"
+            end
+            
+            -- Round loss for clean print
+            lossAmount = math.floor(lossAmount or 0)
+            
+            print(string.format("❌ [Parry Failed] Skill: %s | Verdict: %s | Cause: %s (-%d)", 
+                LastSkillParried, verdict, reason, lossAmount))
+        end
+    end
+
+    -- Health Tracking
+    local lastHealth = hum.Health
+    hum.HealthChanged:Connect(function(newHealth)
+        -- Only trigger if health went DOWN
+        if newHealth < lastHealth then
+            local loss = lastHealth - newHealth
+            NotifyFail("Health Loss", loss)
+        end
+        lastHealth = newHealth
+    end)
+    
+    -- Posture Tracking (Recursive + Threshold)
+    task.spawn(function()
+        local posture = char:FindFirstChild("Posture", true)
+        local attempts = 0
+        while not posture and attempts < 20 do
+            task.wait(0.5)
+            posture = char:FindFirstChild("Posture", true)
+            attempts = attempts + 1
+        end
+
+        if posture then
+            local lastPosture = posture.Value
+            posture.Changed:Connect(function(newPosture)
+                -- FIX: Only flag if loss is significant (> 2)
+                -- This prevents flagging the small "cost" of using a block/parry as a failure
+                if newPosture < (lastPosture - 2) then
+                    local loss = lastPosture - newPosture
+                    NotifyFail("Posture Broken", loss)
+                end
+                lastPosture = newPosture
+            end)
+        end
+    end)
+end
+
+-- ==============================================================================
+-- [LOCAL PLAYER RESPAWN FAIL TRACKING]
+-- ==============================================================================
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    task.wait(1) -- allow Humanoid/Posture to exist
+    SetupFailureDetection(newChar)
+end)
+
+
+-- ==============================================================================
+-- [UI SETUP]
+-- ==============================================================================
+local Window = syde:Init({
+    Title = 'Zone Hub',
+    SubText = 'Auto-Save Active'
+})
+
+task.defer(function()
+    local CoreGui = game:GetService("CoreGui")
+    local gui = CoreGui:FindFirstChild("sydeUILoader")
+
+    if gui and gui:FindFirstChild("lib") then
+        gui.lib.Visible = false
+    end
+end)
+
+
+
+
+task.spawn(function()
+    task.wait(0.2)
+    local gui = game:GetService("CoreGui"):FindFirstChild("Syde")
+    if not gui and LocalPlayer then
+        gui = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("Syde")
+    end
+    if gui then
+        gui.Enabled = false
+        syde:Notify({ Title = 'UI Hidden', Content = 'Press RightShift to Open', Duration = 4 })
+    end
+end)
+
+local MainTab = Window:InitTab({ Title = 'Main' })
+local BreathTab = Window:InitTab({ Title = 'Breaths' })
+local DemonTab = Window:InitTab({ Title = 'Demons' }) -- [[ NEW TAB ]]
+local SkillTab = Window:InitTab({ Title = 'Skills' })
+
+MainTab:Section('Toggles', '8932620770')
+
+MainTab:Toggle({
+    Title = 'Auto Parry',
+    Value = true,
+    Config = false,
+    CallBack = function(v) Config.ParryEnabled = v end
+})
+
+MainTab:Toggle({
+    Title = "Slayer Auto Farm",
+    Value = Config.SpeedHubEnabled,
+    Config = false,
+    CallBack = function(v)
+        ApplySpeedHubState(v)
+    end
+})
+
+
+
+
+MainTab:Toggle({
+    Title = 'ESP Visuals',
+    Value = true,
+    Config = false,
+    CallBack = function(v) Config.ESPEnabled = v end
+})
+
+MainTab:Section('Actions', '8932620770')
+
+MainTab:Button({
+    Title = 'Reload Animations',
+    Description = 'Reloads NPC, Combat & Skill Anims',
+    CallBack = function()
+        if getgenv().LoadValidAnimations then
+            getgenv().LoadValidAnimations()
+        end
+    end,
+})
+
+MainTab:Section('Global', '8932620770')
+MainTab:CreateSlider({
+    Title = 'Detection Range',
+    Sliders = {
+        {
+            Title = 'Max Dist',
+            Range = {5, 100},
+            Increment = 1,
+            StarterValue = Config.AwarenessRange,
+            CallBack = function(v) 
+                Config.AwarenessRange = v 
+                SaveManager:Save() -- Auto Save
+            end
+        }
+    }
+})
+
+-- [[ BREATH SLIDERS ]]
+for breathName, data in pairs(Config.Breaths) do
+    BreathTab:Section(breathName .. ' Settings', '8932620770')
+    BreathTab:CreateSlider({
+        Title = breathName .. ' Timing',
+        Sliders = {
+            {
+                Title = 'Skill Base (%)',
+                Range = {1, 99},
+                Increment = 1,
+                StarterValue = data.SkillPct,
+                CallBack = function(v) 
+                    Config.Breaths[breathName].SkillPct = v 
+                    SaveManager:Save() -- Auto Save
+                end
+            },
+            {
+                Title = 'Combat (%)',
+                Range = {1, 99},
+                Increment = 1,
+                StarterValue = data.CombatPct,
+                CallBack = function(v) 
+                    Config.Breaths[breathName].CombatPct = v 
+                    SaveManager:Save() -- Auto Save
+                end
+            }
+        }
+    })
+end
+
+local sortedDemons = {}
+for name, _ in pairs(Config.Demons) do table.insert(sortedDemons, name) end
+table.sort(sortedDemons)
+
+DemonTab:Section('Blood Demon Arts', '8932620770')
+for _, demonName in ipairs(sortedDemons) do
+    DemonTab:CreateSlider({
+        Title = demonName,
+        Sliders = {
+            {
+                Title = 'Reaction %',
+                Range = {1, 99},
+                Increment = 1,
+                StarterValue = Config.Demons[demonName],
+                CallBack = function(v) 
+                    Config.Demons[demonName] = v 
+                    SaveManager:Save() -- Auto Save
+                end
+            }
+        }
+    })
+end
+
+-- [[ SKILL SLIDERS ]]
+-- Sort alphabetical for cleanliness
+local sortedSkills = {}
+for name, _ in pairs(Config.Skills) do table.insert(sortedSkills, name) end
+table.sort(sortedSkills)
+
+SkillTab:Section('Specific Skills', '8932620770')
+for _, skillName in ipairs(sortedSkills) do
+    SkillTab:CreateSlider({
+        Title = skillName,
+        Sliders = {
+            {
+                Title = 'Reaction %',
+                Range = {1, 99},
+                Increment = 1,
+                StarterValue = Config.Skills[skillName],
+                CallBack = function(v) 
+                    Config.Skills[skillName] = v 
+                    SaveManager:Save() -- Auto Save
+                end
+            }
+        }
+    })
+end
+
+-- ==============================================================================
+-- [LOGIC CORE]
+-- ==============================================================================
+getgenv().LoadValidAnimations = function()
+    syde:Notify({ Title = 'System', Content = 'Loading Animations...', Duration = 3 })
+
+    Config.ValidAnimationIds = {}
+    Config.SkillAnimIdToName = {}
+    Config.SkillNameToAnimId = {}
+
+    local Assets = ReplicatedStorage:WaitForChild("Assets", 10)
+    if not Assets then return warn("No Assets folder") end
+
+    local Anims = Assets:WaitForChild("Animations", 10)
+    if not Anims then return warn("No Animations folder") end
+
+    local function Scan(folder, category)
+        if not folder then return end
+
+        for _, obj in ipairs(folder:GetDescendants()) do
+            if not obj:IsA("Animation") then
+                continue
+            end
+
+            local nameLower = string.lower(obj.Name)
+
+            -- 🚫 EXCLUDES (Combat utility / non-attacks)
+            if category == "Combat" then
+                if nameLower:find("block")
+                or nameLower:find("parry")
+                or nameLower:find("run")
+                or nameLower:find("clean")
+                or nameLower:find("runold")
+                or nameLower:find("shakeblock")
+                or nameLower:find("idle") then
+                    continue
+                end
+            end
+
+            local animId = tostring(obj.AnimationId)
+            Config.ValidAnimationIds[animId] = category
+
+            -- ✅ Build skill name mapping from BOTH Skills + BreathAnims
+            if category == "Skills" or category == "Breath" then
+                local skillName = obj.Name
+                Config.SkillAnimIdToName[animId] = skillName
+                Config.SkillNameToAnimId[skillName] = animId
+            end
+        end
+    end
+
+    -- Core sources
+    Scan(Anims:FindFirstChild("Combat"), "Combat")
+    Scan(Anims:FindFirstChild("NPCAnimPacks"), "NPC")
+
+    -- Skill sources (including nested folders)
+    Scan(Anims:FindFirstChild("Skills"), "Skills")
+    Scan(Anims:FindFirstChild("BreathAnims"), "Breath")
+
+    syde:Notify({
+        Title = 'Success',
+        Content = 'Loaded IDs: ' .. CountTable(Config.ValidAnimationIds),
+        Duration = 5
+    })
+end
+
+
+-- ==============================================================================
+-- [ESP LOGIC] (Updated with Lifeforce)
+-- ==============================================================================
+local function UpdateBar(frame, current, max)
+    if max <= 0 then max = 1 end
+    local percent = math.clamp(current / max, 0, 1)
+    frame.Size = UDim2.new(1, 0, percent, 0)
+end
+
+local function CreateESP(character)
+    if not Config.ESPEnabled then return end
+    if character == LocalPlayer.Character then return end
+
+    if string.sub(character.Name, 1, 4) == "NPC_" then
+        local race = character:GetAttribute("Race")
+        if not race or race == "Human" then return end
+    end
+
+    local rootPart = character:WaitForChild("HumanoidRootPart", 5)
+    local humanoid = character:WaitForChild("Humanoid", 5)
+    if not rootPart or not humanoid then return end
+    if rootPart:FindFirstChild("StatusESP") then return end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "StatusESP"
+    billboard.Adornee = rootPart
+    billboard.Size = UDim2.new(2, 0, 3, 0)
+    billboard.StudsOffset = Vector3.new(3, 0, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = rootPart
+
+    -- [[ 1. HEALTH BAR ]]
+    local healthBg = Instance.new("Frame")
+    healthBg.Name = "HealthBG"
+    healthBg.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    healthBg.BorderSizePixel = 0
+    healthBg.Size = UDim2.new(0.1, 0, 1.15, 0)
+    healthBg.Position = UDim2.new(0.15, 0, -0.075, 0)
+    healthBg.Parent = billboard
+
+    local healthFill = Instance.new("Frame")
+    healthFill.Name = "Fill"
+    healthFill.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
+    healthFill.BorderSizePixel = 0
+    healthFill.AnchorPoint = Vector2.new(0, 1)
+    healthFill.Position = UDim2.new(0, 0, 1, 0)
+    healthFill.Size = UDim2.new(1, 0, 1, 0)
+    healthFill.Parent = healthBg
+
+    -- [[ 2. LIFEFORCE BAR (ADDED) ]]
+    local lifeBg = Instance.new("Frame")
+    lifeBg.Name = "LifeForceBG"
+    lifeBg.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    lifeBg.BorderSizePixel = 0
+    lifeBg.Size = UDim2.new(0.1, 0, 1, 0)
+    lifeBg.Position = UDim2.new(0.45, 0, 0, 0)
+    lifeBg.Visible = false -- Hidden by default until found
+    lifeBg.Parent = billboard
+
+    local lifeFill = Instance.new("Frame")
+    lifeFill.Name = "Fill"
+    lifeFill.BackgroundColor3 = Color3.fromRGB(255, 170, 255) -- Red for Lifeforce
+    lifeFill.BorderSizePixel = 0
+    lifeFill.AnchorPoint = Vector2.new(0, 1)
+    lifeFill.Position = UDim2.new(0, 0, 1, 0)
+    lifeFill.Size = UDim2.new(1, 0, 1, 0)
+    lifeFill.Parent = lifeBg
+
+    -- [[ 3. POSTURE BAR ]]
+    local postureBg = Instance.new("Frame")
+    postureBg.Name = "PostureBG"
+    postureBg.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    postureBg.BorderSizePixel = 0
+    postureBg.Size = UDim2.new(0.1, 0, 1, 0)
+    postureBg.Position = UDim2.new(0.75, 0, 0, 0)
+    postureBg.Visible = false
+    postureBg.Parent = billboard
+
+    local postureFill = Instance.new("Frame")
+    postureFill.Name = "Fill"
+    postureFill.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
+    postureFill.BorderSizePixel = 0
+    postureFill.AnchorPoint = Vector2.new(0, 1)
+    postureFill.Position = UDim2.new(0, 0, 1, 0)
+    postureFill.Size = UDim2.new(1, 0, 1, 0)
+    postureFill.Parent = postureBg
+
+    -- [[ CONNECTIONS ]]
+
+    -- Health
+    humanoid.HealthChanged:Connect(function()
+        UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
+    end)
+    UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
+
+    -- Lifeforce (Search recursively)
+    local lifeforce = character:FindFirstChild("Lifeforce", true)
+    if lifeforce then
+        lifeBg.Visible = true
+        lifeforce.Changed:Connect(function()
+            UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
+        end)
+        UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
+    else
+        -- Sometimes it loads late, check again briefly
+        task.delay(1, function()
+            if not character then return end
+            lifeforce = character:FindFirstChild("Lifeforce", true)
+            if lifeforce then
+                lifeBg.Visible = true
+                lifeforce.Changed:Connect(function()
+                    UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
+                end)
+                UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
+            end
+        end)
+    end
+
+    -- Posture (Search recursively)
+    local posture = character:FindFirstChild("Posture", true)
+    if posture then
+        postureBg.Visible = true
+        posture.Changed:Connect(function()
+            UpdateBar(postureFill, posture.Value, posture.MaxValue)
+        end)
+        UpdateBar(postureFill, posture.Value, posture.MaxValue)
+    else
+        postureBg.Visible = false
+    end
+end
+
+-- ======================================================================
+-- [RANGE VISUALIZER]
+-- ======================================================================
+local RangeVisual = {}
+
+function RangeVisual:Create(char, color, range)
+    local root = GetRoot(char)
+    if not root then return nil end
+
+    local p = Instance.new("Part")
+    p.Name = "AnimRangeVisual"
+    p.Anchored = true
+    p.CanCollide = false
+    p.CanQuery = false
+    p.CanTouch = false
+    p.Material = Enum.Material.Neon
+    p.Color = color
+    p.Transparency = 0.9
+    p.Shape = Enum.PartType.Cylinder
+    p.Size = Vector3.new(0.15, (range * 2), (range * 2))
+    p.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, 0, math.rad(90))
+    p.Parent = Workspace
+    return p
+end
+
+function RangeVisual:BindToTrack(char, track, color, range)
+    local root = GetRoot(char)
+    if not root or not track then return end
+
+    local part = self:Create(char, color, range)
+    if not part then return end
+
+    local hbConn
+    hbConn = RunService.Heartbeat:Connect(function()
+        if not track.IsPlaying or not root.Parent then
+            if hbConn then hbConn:Disconnect() end
+            if part then part:Destroy() end
+            return
+        end
+        local pos = root.Position
+        part.CFrame = CFrame.new(Vector3.new(pos.X, pos.Y - 2.5, pos.Z)) * CFrame.Angles(0, 0, math.rad(90))
+    end)
+
+    track.Stopped:Connect(function()
+        if hbConn then hbConn:Disconnect() end
+        if part then part:Destroy() end
+    end)
+end
+
+-- ==============================================================================
+-- [PARRY CORE - MONITOR] (FAST RECOVERY FIX)
+-- ==============================================================================
+local function MonitorAndBlock(track, char, animId, animName, settings)
+    -- Name Resolution
+    if (not animName) or animName == "" or animName == "Animation" or animName == "Animation1" then
+        animName = Config.SkillAnimIdToName[tostring(animId)]
+            or (settings.Type .. " (" .. tostring(animId):match("%d+") .. ")")
+    end
+
+    local triggerPct = settings.ReactionPct
+    local range = settings.Range
+
+    -- Ping Compensation
+    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+    local pingNumber = tonumber(ping:match("%d+")) or 50
+    local pingOffset = (pingNumber / 1000) * 8
+    
+    triggerPct = math.clamp(triggerPct - pingOffset, 1, 99)
+
+    -- Visuals
+    if Config.ESPEnabled and settings.Color and range then
+        RangeVisual:BindToTrack(char, track, settings.Color, range)
+    end
+
+    -- State
+    local isFeinted = false
+    local connections = {}
+    
+    -- Specific Ignore Color (Hyperarmor/Orange)
+    local ignoreColor = Color3.fromRGB(255, 150, 30)
+
+    -- [[ 1. DETECT ANIMATION STOP (Standard Feint) ]]
+    table.insert(connections, track.Stopped:Connect(function()
+        isFeinted = true
+    end))
+
+    -- [[ 2. DETECT NEW HIGHLIGHT (Visual Feint) ]]
+    -- We ONLY listen for NEW highlights added during this specific animation.
+    -- We do NOT check existing highlights to prevent "old" feint effects from blocking new attacks.
+    table.insert(connections, char.ChildAdded:Connect(function(child)
+        if child:IsA("Highlight") then
+            -- Check 1: Ignore our own highlight
+            if child.Name == "ParryHub_HL" or child:GetAttribute("ParryHubOwned") then return end
+            
+            -- Check 2: Ignore specific Orange color (255, 150, 30)
+            if child.FillColor == ignoreColor then return end
+
+            -- If it passed checks, it is a real feint for THIS attack
+            isFeinted = true
+        end
+    end))
+
+    while track.IsPlaying do
+        -- IMMEDIATE ABORT
+        if isFeinted then break end
+
+        -- [[ REMOVED HasExternalHighlight CHECK ]] 
+        -- This prevents lingering highlights from the previous feint causing us to ignore the NEXT attack.
+
+        local myChar = LocalPlayer.Character
+        if not myChar then break end
+
+        local myRoot = GetRoot(myChar)
+        local enemyRoot = GetRoot(char)
+        if not myRoot or not enemyRoot then break end
+
+        local length = track.Length
+        local pos = track.TimePosition
+        local percent = 0
+        if length > 0 then percent = (pos / length) * 100 end
+
+        if percent >= 98 then break end
+
+        local dist = (enemyRoot.Position - myRoot.Position).Magnitude
+        local facing = IsFacing(char, myRoot.Position)
+        local requireFacing = dist > (range * 0.6)
+
+        -- [[ TRIGGER LOGIC ]]
+        if dist <= range and (not requireFacing or facing) and percent >= triggerPct then
+            
+            -- Final Safety Checks
+            if not track.IsPlaying or isFeinted then break end
+            if IsPlayerBusyCombatAnim() then break end
+
+            -- BLOCK ACTION
+            BlockRemote:FireServer()
+            
+            LastParryTime = tick()
+            LastSkillParried = Config.SkillAnimIdToName[tostring(animId)] or animName or "Unknown"
+
+            -- Spawn Visual Effect
+            task.spawn(function()
+                local hl = Instance.new("Highlight")
+                hl.Name = "ParryHub_HL"
+                hl:SetAttribute("ParryHubOwned", true)
+                hl.FillColor = settings.Color
+                hl.OutlineTransparency = 1
+                hl.Parent = char
+                Debris:AddItem(hl, 0.3)
+            end)
+
+            break
+        end
+        RunService.Heartbeat:Wait()
+    end
+
+    -- [[ AGGRESSIVE CLEANUP ]]
+    -- Ensure we don't leave any listeners active that could mess with the next track
+    for _, conn in ipairs(connections) do
+        conn:Disconnect()
+    end
+end
+
+-- ==============================================================================
+-- [PARRY CORE - ON ANIM PLAYED] (UPDATED)
+-- ==============================================================================
+local function OnAnimationPlayed(char, track)
+    if not Config.ParryEnabled then return end
+
+    local myChar = LocalPlayer.Character
+    if not myChar or char == myChar then return end
+
+    local myRoot = GetRoot(myChar)
+    local enemyRoot = GetRoot(char)
+    if not myRoot or not enemyRoot then return end
+
+    if not track.Animation then return end
+
+    local animId = tostring(track.Animation.AnimationId)
+    local catName = Config.ValidAnimationIds[animId]
+    if not catName then return end
+
+    -- ✅ Resolve the real skill name from Assets.Animations.Skills / BreathAnims / BDA
+    local resolvedSkillName = Config.SkillAnimIdToName[animId]
+
+    local dist = (enemyRoot.Position - myRoot.Position).Magnitude
+    if dist > Config.AwarenessRange then return end
+
+    -- Determine Settings
+    local variantKey = GetVariantKey(char) -- Returns "Water", "Akaza", etc.
+    
+    local breathConfig = Config.Breaths[variantKey]
+    local demonPct = Config.Demons[variantKey] -- Single value slider for demons
+
+    -- Defaults
+    local reaction = 20
+    local range = 12
+    local color = Color3.fromRGB(255, 255, 255)
+
+    -- 1. Apply Baseline (Breath vs Demon)
+    if breathConfig then
+        reaction = breathConfig.SkillPct
+        range = breathConfig.Range
+        color = breathConfig.Color
+    elseif demonPct then
+        -- [[ NEW: Apply Demon Settings ]]
+        reaction = demonPct
+        range = 14 -- Standard range for demons
+        color = Color3.fromRGB(150, 0, 0) -- Dark Red for Demon Arts
+    end
+
+    -- ✅ Prefer resolved name, fallback to track.Name
+    local rawName = track.Name
+    local cleanName = resolvedSkillName or rawName
+
+    -- 2. Apply Overrides based on Category
+    
+    -- CHECK: Specific Skill Override (Highest Priority)
+    if resolvedSkillName and Config.Skills[resolvedSkillName] then
+    reaction = Config.Skills[resolvedSkillName]
+    range = Config.GlobalRange
+        -- Keep range/color from baseline
+        
+    elseif catName == "Combat" then
+        -- M1s / Normal Combat
+        if breathConfig then
+            reaction = breathConfig.CombatPct
+            color = Color3.fromRGB(255, 100, 100) -- Redish for combat
+        elseif demonPct then
+            reaction = demonPct -- Demons use the same slider for M1s usually
+            color = Color3.fromRGB(150, 0, 0) 
+        else
+            reaction = 20 -- Fallback M1
+            color = Color3.fromRGB(255, 100, 100)
+        end
+        cleanName = "M1/Combat"
+
+    elseif catName == "Skills" or catName == "Breath" then
+        -- Already set baseline reaction above (breathConfig.SkillPct or demonPct)
+        -- Just ensuring cleanName is correct
+        
+    elseif catName == "NPC" then
+        reaction = Config.NPC.ReactionPct
+        range = Config.NPC.Range
+        color = Config.NPC.Color
+        cleanName = "NPC Attack"
+    end
+
+    local sessionSettings = {
+        Range = range,
+        ReactionPct = reaction,
+        Color = color,
+        Type = catName
+    }
+
+    task.spawn(function()
+        -- ✅ UPDATED CALL: pass animId + cleanName
+        MonitorAndBlock(track, char, animId, cleanName, sessionSettings)
+    end)
+end
+
+local function ConnectParry(char)
+    local humanoid = char:WaitForChild("Humanoid", 10)
+    if not humanoid then return end
+    local animator = humanoid:WaitForChild("Animator", 10)
+    if not animator then return end
+
+    animator.AnimationPlayed:Connect(function(track)
+        OnAnimationPlayed(char, track)
+    end)
+end
+
+
+-- ==============================================================================
+-- [INITIALIZATION]
+-- ==============================================================================
+task.spawn(getgenv().LoadValidAnimations)
+
+local function SetupCharacter(char)
+    task.spawn(function() CreateESP(char) end)
+    task.spawn(function() ConnectParry(char) end)
+
+    -- ✅ Only track FAILS on *your* character (health/posture loss)
+    if LocalPlayer and char == LocalPlayer.Character then
+        task.spawn(function() SetupFailureDetection(char) end)
+    end
+end
+
+
+for _, p in pairs(Players:GetPlayers()) do
+    if p.Character then SetupCharacter(p.Character) end
+    p.CharacterAdded:Connect(SetupCharacter)
+end
+
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(SetupCharacter)
+end)
+
+if Config.TargetFolder then
+    for _, child in pairs(Config.TargetFolder:GetChildren()) do
+        SetupCharacter(child)
+    end
+    Config.TargetFolder.ChildAdded:Connect(function(child)
+        task.wait(1)
+        SetupCharacter(child)
+    end)
+end
+
+if hookmetamethod and getnamecallmethod then
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        if method == "FireServer" and self == BlockRemote then
+             -- Logic
+        end
+        return oldNamecall(self, ...)
+    end))
+end
+
+game.Close:Connect(function()
+    SaveManager:Save()
+end)   
