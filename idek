@@ -55,6 +55,29 @@ local Config = {
     AwarenessRange = 45,  -- Max distance to check for enemies
     TargetFolder = Workspace:FindFirstChild("Live"),
 
+CombatAnimIdToName = {},
+
+-- Ignore any Combat animation whose name contains one of these substrings (case-insensitive)
+CombatIgnoreWords = {
+    -- examples (edit to your needs):
+    "Block",
+    "unsheathe",
+    "sheath",
+    "Idle",
+    "Parry",
+    "walk",
+    "ShakeBlock",
+    "SheatheBack",
+    "SheatheHip",
+    "unSheatheBack",
+    "unSheatheHip",
+},
+
+-- (optional) Ignore exact Combat animation names too
+CombatIgnoreExact = {
+    -- ["CombatIdle"] = true,
+},
+
 	AutoFarmSlot = 1,
 
 	AutoFarmSlots = {
@@ -1680,7 +1703,7 @@ getgenv().LoadValidAnimations = function()
 
     Config.ValidAnimationIds = {}
 	Config.NPCAnimIdToName = {}
-
+Config.CombatAnimIdToName = {}
     Config.SkillAnimIdToName = {}
     Config.SkillNameToAnimId = {}
 
@@ -1702,6 +1725,9 @@ if category == "NPC" then
     Config.NPCAnimIdToName[animId] = obj.Name
 end
 
+if category == "Combat" then
+    Config.CombatAnimIdToName[animId] = obj.Name
+end
 
                 -- ✅ Build skill name mapping from BOTH Skills + BreathAnims
                 if category == "Skills" or category == "Breath" then
@@ -1715,6 +1741,7 @@ end
 
     -- Core sources
     Scan(Anims:FindFirstChild("Combat"), "Combat")
+
     Scan(Anims:FindFirstChild("NPCAnimPacks"), "NPC")
 
     -- ✅ Skill sources (including nested folders)
@@ -2758,6 +2785,32 @@ end
 -- ==============================================================================
 -- [PARRY CORE - ON ANIM PLAYED] (UPDATED)
 -- ==============================================================================
+
+
+local function ShouldIgnoreCombatAnim(name: string?): boolean
+    if not name then return false end
+    local n = tostring(name):lower()
+
+    -- exact-name ignore
+    if Config.CombatIgnoreExact and Config.CombatIgnoreExact[tostring(name)] then
+        return true
+    end
+
+    -- substring ignore
+    if Config.CombatIgnoreWords then
+        for _, w in ipairs(Config.CombatIgnoreWords) do
+            w = tostring(w):lower()
+            if w ~= "" and n:find(w, 1, true) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+
+
 local function OnAnimationPlayed(char, track)
     if not Config.ParryEnabled then return end
 
@@ -2774,81 +2827,82 @@ local function OnAnimationPlayed(char, track)
     local catName = Config.ValidAnimationIds[animId]
     if not catName then return end
 
-    -- ✅ Resolve the real skill name from Assets.Animations.Skills / BreathAnims / BDA
+    -- Resolve skill name
     local resolvedSkillName = Config.SkillAnimIdToName[animId]
 
     local dist = (enemyRoot.Position - myRoot.Position).Magnitude
     if dist > Config.AwarenessRange then return end
 
-    -- Determine Settings
-    local variantKey = GetVariantKey(char) -- Returns "Water", "Akaza", etc.
-    
+    -- Determine variant
+    local variantKey = GetVariantKey(char)
     local breathConfig = Config.Breaths[variantKey]
-local demonData = Config.Demons[variantKey]
+    local demonData = Config.Demons[variantKey]
 
     -- Defaults
     local reaction = 20
     local range = 12
     local color = Color3.fromRGB(255, 255, 255)
 
-    -- 1. Apply Baseline (Breath vs Demon)
+    -- 1. Baseline (Breath / Demon)
     if breathConfig then
         reaction = breathConfig.SkillPct
         range = breathConfig.Range
         color = breathConfig.Color
     elseif demonData then
-    reaction = demonData.ReactionPct or reaction
-    range = demonData.Range or range
-    color = Color3.fromRGB(150, 0, 0)
-end
+        reaction = demonData.ReactionPct or reaction
+        range = demonData.Range or range
+        color = Color3.fromRGB(150, 0, 0)
+    end
 
-
-
-    -- ✅ Prefer resolved name, fallback to track.Name
+    -- Prefer resolved name
     local rawName = track.Name
     local cleanName = resolvedSkillName or rawName
 
-    -- 2. Apply Overrides based on Category
-    
-    -- CHECK: Specific Skill Override (Highest Priority)
+    -- 2. Overrides by Category
     if resolvedSkillName and Config.Skills[resolvedSkillName] then
+        -- Skill-specific override
         reaction = Config.Skills[resolvedSkillName]
-        -- Keep range/color from baseline
-        
+
     elseif catName == "Combat" then
-        -- M1s / Normal Combat
+        -- Resolve Combat animation name
+        local combatAnimName =
+            Config.CombatAnimIdToName[animId] or track.Name or "Combat"
+
+        -- Ignore unwanted Combat animations
+        if ShouldIgnoreCombatAnim(combatAnimName) then
+            return
+        end
+
         if breathConfig then
             reaction = breathConfig.CombatPct
-            color = Color3.fromRGB(255, 100, 100) -- Redish for combat
+            color = Color3.fromRGB(255, 100, 100)
         elseif demonData then
-    reaction = demonData.ReactionPct or 20
-    range = demonData.Range or range
-    color = Color3.fromRGB(150, 0, 0)
+            reaction = demonData.ReactionPct or 20
+            range = demonData.Range or range
+            color = Color3.fromRGB(150, 0, 0)
         else
-            reaction = 20 -- Fallback M1
+            reaction = 20
             color = Color3.fromRGB(255, 100, 100)
         end
-        cleanName = "M1/Combat"
+
+        cleanName = combatAnimName
 
     elseif catName == "Skills" or catName == "Breath" then
-        -- Already set baseline reaction above (breathConfig.SkillPct or demonPct)
-        -- Just ensuring cleanName is correct
-        
+        -- Baseline already applied
+
     elseif catName == "NPC" then
-    -- Look up the NPCAnimPacks animation name by AnimationId
-    local npcAnimName = Config.NPCAnimIdToName[animId]
+        local npcAnimName = Config.NPCAnimIdToName[animId]
 
-    -- Only react to Swing 1 / Swing 2 (must match names in NPCAnimPacks)
-    if npcAnimName ~= "Swing 1" and npcAnimName ~= "Swing 2" then
-        return
+        -- Only react to Swing 1 / Swing 2
+        if npcAnimName ~= "Swing 1" and npcAnimName ~= "Swing 2" then
+            return
+        end
+
+        reaction = Config.NPC.ReactionPct
+        range = Config.NPC.Range
+        color = Config.NPC.Color
+        cleanName = npcAnimName
     end
-
-    reaction = Config.NPC.ReactionPct
-    range = Config.NPC.Range
-    color = Config.NPC.Color
-    cleanName = npcAnimName
-end
-
 
     local sessionSettings = {
         Range = range,
@@ -2858,10 +2912,10 @@ end
     }
 
     task.spawn(function()
-        -- ✅ UPDATED CALL: pass animId + cleanName
         MonitorAndBlock(track, char, animId, cleanName, sessionSettings)
     end)
 end
+
 
 local function ConnectParry(char)
     local humanoid = char:WaitForChild("Humanoid", 10)
