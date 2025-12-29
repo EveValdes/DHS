@@ -199,6 +199,7 @@ function SaveManager:Save()
         AwarenessRange = Config.AwarenessRange,
         SpeedHubEnabled = Config.SpeedHubEnabled,
 		NPCReactionTiming = Config.NPC and Config.NPC.ReactionPct or 19,
+        ParryEnabled = Config.ParryEnabled,
 
 		
 		DemonAutoFarmEnabled = (getgenv().DemonAutoFarmEnabled == true),
@@ -297,6 +298,11 @@ function SaveManager:Load()
 if result.NPCReactionTiming ~= nil then
     Config.NPC = Config.NPC or {}
     Config.NPC.ReactionPct = tonumber(result.NPCReactionTiming) or (Config.NPC.ReactionPct or 19)
+end
+
+-- Auto Parry toggle
+if result.ParryEnabled ~= nil then
+    Config.ParryEnabled = (result.ParryEnabled == true)
 end
 
 
@@ -1517,11 +1523,13 @@ AutoFarmTab:Toggle({
 
 MainTab:Toggle({
     Title = 'Auto Parry',
-    Value = true,
+    Value = Config.ParryEnabled, -- ✅ load saved state
     Config = false,
-    CallBack = function(v) Config.ParryEnabled = v end
+    CallBack = function(v)
+        Config.ParryEnabled = v
+        SaveManager:Save() -- ✅ save immediately
+    end
 })
-
 
 AutoFarmTab:Toggle({
     Title = "Demon Autofarm",
