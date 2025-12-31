@@ -60,7 +60,7 @@ ClickXY = { X = 814, Y = 631 },
 ClickXY2 = { X = 771, Y = 650 },
 
     
-    AutoParryKey = "T", -- default key as STRING
+    AutoParryKey = "L", -- default key as STRING
 
     ParryEnabled = true,
     ESPEnabled = true,
@@ -2231,7 +2231,7 @@ end
 
 MainTab:Keybind({
     Title = "Toggle Auto Parry",
-    Key = StringToKeyCode(Config.AutoParryKey) or Enum.KeyCode.Semicolon,
+    Key = StringToKeyCode(Config.AutoParryKey) or Enum.KeyCode.L,
 
     CallBack = function()
         Config.ParryEnabled = not Config.ParryEnabled
@@ -2369,22 +2369,178 @@ AutoFarmTab:Keybind({
 
 
 
+-- ===== ESP enable/disable helpers (put ABOVE the Toggle) =====
+local function RemoveESPFromCharacter(character)
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    local a = rootPart:FindFirstChild("StatusESP")
+    if a then a:Destroy() end
+
+    local b = rootPart:FindFirstChild("HealthESP")
+    if b then b:Destroy() end
+end
+
+local function RemoveAllESP()
+    -- Players
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            RemoveESPFromCharacter(p.Character)
+        end
+    end
+
+    -- NPCs / models if you use a target folder
+    if Config.TargetFolder then
+        for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+            if m:IsA("Model") then
+                RemoveESPFromCharacter(m)
+            end
+        end
+    end
+end
+
+local function CreateESPForEveryone()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            task.spawn(function() CreateESP(p.Character) end)
+        end
+    end
+
+    if Config.TargetFolder then
+        for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+            if m:IsA("Model") then
+                task.spawn(function() CreateESP(m) end)
+            end
+        end
+    end
+end
+
+local function ApplyESPState(enabled)
+    enabled = (enabled == true)
+    Config.ESPEnabled = enabled
+    SaveManager:Save()
+
+    if enabled then
+        CreateESPForEveryone()
+    else
+        RemoveAllESP()
+    end
+end
+-- ===== ESP Re-enable Safe System =====
+local ESPHooksSetup = false
+
+local function RemoveESPFromCharacter(character)
+	if not character then return end
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+
+	local a = rootPart:FindFirstChild("StatusESP")
+	if a then a:Destroy() end
+
+	-- If you have separate health billboard, keep this too:
+	local b = rootPart:FindFirstChild("HealthESP")
+	if b then b:Destroy() end
+end
+
+local function RemoveAllESP()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			RemoveESPFromCharacter(p.Character)
+		end
+	end
+
+	if Config.TargetFolder then
+		for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+			if m:IsA("Model") then
+				RemoveESPFromCharacter(m)
+			end
+		end
+	end
+end
+
+local function CreateESPForEveryone()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			task.spawn(function() CreateESP(p.Character) end)
+		end
+	end
+
+	if Config.TargetFolder then
+		for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+			if m:IsA("Model") then
+				task.spawn(function() CreateESP(m) end)
+			end
+		end
+	end
+end
+
+local function SetupESPHooks()
+	if ESPHooksSetup then return end
+	ESPHooksSetup = true
+
+	-- Players: future spawns
+	for _, p in ipairs(Players:GetPlayers()) do
+		p.CharacterAdded:Connect(function(char)
+			task.wait(0.25)
+			if Config.ESPEnabled then
+				CreateESP(char)
+			end
+		end)
+	end
+
+	Players.PlayerAdded:Connect(function(p)
+		p.CharacterAdded:Connect(function(char)
+			task.wait(0.25)
+			if Config.ESPEnabled then
+				CreateESP(char)
+			end
+		end)
+	end)
+
+	-- NPC folder: future spawns (optional)
+	if Config.TargetFolder then
+		Config.TargetFolder.ChildAdded:Connect(function(child)
+			if not child:IsA("Model") then return end
+			task.wait(0.25)
+			if Config.ESPEnabled then
+				CreateESP(child)
+			end
+		end)
+	end
+end
+
+local function ApplyESPState(enabled)
+	enabled = (enabled == true)
+	Config.ESPEnabled = enabled
+	SaveManager:Save()
+
+	SetupESPHooks()
+
+	if enabled then
+		CreateESPForEveryone()
+	else
+		RemoveAllESP()
+	end
+end
 
 
 MainTab:Toggle({
-    Title = "ESP",
-    Value = (Config.ESPEnabled == true),
-    Config = false,
-    CallBack = function(v)
-        ApplyESPState(v)
+	Title = "ESP",
+	Value = (Config.ESPEnabled == true),
+	Config = false,
+	CallBack = function(v)
+		ApplyESPState(v)
 
-        syde:Notify({
-            Title = "ESP Visuals",
-            Content = (Config.ESPEnabled and "Enabled" or "Disabled"),
-            Duration = 2
-        })
-    end
+		syde:Notify({
+			Title = "ESP Visuals",
+			Content = (Config.ESPEnabled and "Enabled" or "Disabled"),
+			Duration = 2
+		})
+	end
 })
+
+
 
 
 MainTab:Section('Global', '8932620770')
@@ -2747,8 +2903,8 @@ local function CreateESP(character)
         lifeBg,
         lifeFill,
         ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(90, 0, 0)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 60, 60)),
+           ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 40, 40)), -- lighter dark red
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 110, 110)), -- brighter top
         })
     )
 
