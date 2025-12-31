@@ -49,6 +49,19 @@ local BlockRemote = ReplicatedStorage:WaitForChild("EVENTS"):WaitForChild("Block
 
 -- [[ CONFIGURATION ]] --
 local Config = {
+    AutoAdjustEnabled = false,
+    AnimOverrides = {},
+    IgnoreSameRace = false,
+
+    -- Click coords for Slayer farm "V + click routine"
+ClickXY = { X = 814, Y = 631 },
+
+-- Click coords for Demon farm "V + click routine"
+ClickXY2 = { X = 771, Y = 650 },
+
+    
+    AutoParryKey = "T", -- default key as STRING
+
     ParryEnabled = true,
     ESPEnabled = true,
     FacingDot = 0.2,      -- 0.5 = 45 degrees
@@ -182,9 +195,19 @@ CombatIgnoreExact = {
 }
 
 
--- Tracker for notifications
 local LastParryTime = 0
 local LastSkillParried = "None"
+
+local LastParryAnimId = nil
+local LastParryUsedPct = nil
+local LastParryAnimName = nil
+local LastParryVariantKey = nil -- NEW: breath-variant key used for this parry attempt (or nil)
+
+-- NEW: after a detected feint, don't count "misses" for 1 second
+local FeintGraceUntil = 0
+
+          
+
 
 -- ==============================================================================
 -- [3] SAVE MANAGER
@@ -196,10 +219,16 @@ function SaveManager:Save()
     if not writefile then return end
 
     local dataToSave = {
+        AutoAdjustEnabled = (Config.AutoAdjustEnabled == true),
+AnimOverrides = Config.AnimOverrides or {},
         AwarenessRange = Config.AwarenessRange,
+        AutoParryKey = Config.AutoParryKey,
         SpeedHubEnabled = Config.SpeedHubEnabled,
 		NPCReactionTiming = Config.NPC and Config.NPC.ReactionPct or 19,
         ParryEnabled = Config.ParryEnabled,
+        IgnoreSameRace = (Config.IgnoreSameRace == true),
+        ClickXY = Config.ClickXY,
+        ClickXY2 = Config.ClickXY2,
 
 		
 		DemonAutoFarmEnabled = (getgenv().DemonAutoFarmEnabled == true),
@@ -283,6 +312,11 @@ function SaveManager:Load()
                 Config.AwarenessRange = result.AwarenessRange
             end
 
+            if result.AutoParryKey then
+    Config.AutoParryKey = tostring(result.AutoParryKey)
+end
+
+
             -- Breaths
             if result.Breaths then
                 for name, savedData in pairs(result.Breaths) do
@@ -294,11 +328,35 @@ function SaveManager:Load()
                 end
             end
 
+            if result.IgnoreSameRace ~= nil then
+    Config.IgnoreSameRace = (result.IgnoreSameRace == true)
+end
+
+
+if result.ClickXY and type(result.ClickXY) == "table" then
+    Config.ClickXY = result.ClickXY
+end
+if result.ClickXY2 and type(result.ClickXY2) == "table" then
+    Config.ClickXY2 = result.ClickXY2
+end
+
+
 			-- NPC reaction timing
 if result.NPCReactionTiming ~= nil then
     Config.NPC = Config.NPC or {}
     Config.NPC.ReactionPct = tonumber(result.NPCReactionTiming) or (Config.NPC.ReactionPct or 19)
 end
+
+if result.AutoAdjustEnabled ~= nil then
+    Config.AutoAdjustEnabled = (result.AutoAdjustEnabled == true)
+end
+
+if result.AnimOverrides and type(result.AnimOverrides) == "table" then
+    Config.AnimOverrides = result.AnimOverrides
+else
+    Config.AnimOverrides = Config.AnimOverrides or {}
+end
+
 
 -- Auto Parry toggle
 if result.ParryEnabled ~= nil then
@@ -416,7 +474,12 @@ local success, err = pcall(function()
 	local W_SPAM_SPEED = 0.08
 
 	-- Fixed click positions
-	local CLICK_X, CLICK_Y = 814, 631
+	local function getSlayerClickXY()
+    local x = tonumber(getgenv().SlayerClickX) or 814
+    local y = tonumber(getgenv().SlayerClickY) or 631
+    return x, y
+end
+
 	local VE_TOP_X, VE_TOP_Y = 1889, 50
 -- Pulled from global slot selection (defaults if unset)
 local function getEmptyLiveXY()
@@ -960,7 +1023,10 @@ end)
 
 					VirtualPressKey(Enum.KeyCode.V, 0.05)
 					task.wait(0.2)
-					VirtualClickAt(CLICK_X, CLICK_Y)
+					
+local cx, cy = getSlayerClickXY()
+VirtualClickAt(cx, cy)
+
 				end
 			else
 				-- If we ARE on a desired mission, reset the stuck counter
@@ -1238,6 +1304,18 @@ getgenv().DemonAutoFarmEnabled = (Config.DemonAutoFarmEnabled == true)
 -- Apply slot AFTER load (and ApplyAutoFarmSlot now definitely exists)
 ApplyAutoFarmSlot(Config.AutoFarmSlot or 1)
 
+-- Ensure click coord tables exist
+Config.ClickXY = Config.ClickXY or { X = 814, Y = 631 }
+Config.ClickXY2 = Config.ClickXY2 or { X = 771, Y = 650 }
+
+-- Sync to globals for embedded farm scripts
+getgenv().SlayerClickX = tonumber(Config.ClickXY.X) or 814
+getgenv().SlayerClickY = tonumber(Config.ClickXY.Y) or 631
+
+getgenv().DemonClickX = tonumber(Config.ClickXY2.X) or 771
+getgenv().DemonClickY = tonumber(Config.ClickXY2.Y) or 650
+
+
 -- Apply saved SpeedHub state on load (loads SpeedHub if enabled)
 -- Guard against LoadSpeedHub not existing yet (ordering issue)
 if Config.SpeedHubEnabled == true then
@@ -1331,6 +1409,119 @@ local function CountTable(t)
 end
 -- SPEED HUB CONTROLLER
 
+-- NEW: only use Breath-string variants for per-animation overrides (NOT StyleBDA players)
+local function GetBreathOnlyVariantKey(enemyChar)
+    if not enemyChar then return nil end
+
+    -- If they have StyleBDA, do NOT do breath-variant overrides
+    local bda = enemyChar:GetAttribute("StyleBDA")
+    if bda ~= nil and tostring(bda) ~= "" then
+        return nil
+    end
+
+    local breath = enemyChar:GetAttribute("Breath")
+    if breath ~= nil then
+        breath = tostring(breath)
+        if breath ~= "" then
+            return breath
+        end
+    end
+
+    return nil
+end
+
+-- NEW: detect if LocalPlayer is currently playing ANY animation we detect/react to
+local function IsLocalPlayerPlayingReactiveAnim()
+    local myChar = LocalPlayer.Character
+    if not myChar then return false end
+    local hum = myChar:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+
+    for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
+        local anim = t.Animation
+        if anim and anim.AnimationId then
+            local aid = tostring(anim.AnimationId)
+            if Config.ValidAnimationIds and Config.ValidAnimationIds[aid] then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- NEW: AnimOverride storage that supports:
+--   old: Config.AnimOverrides[animId] = number
+--   new: Config.AnimOverrides[animId] = { Default = number, Breaths = { ["Flame"]=number, ... } }
+local function GetAnimOverride(animId, breathKey)
+    if not Config.AnimOverrides then return nil end
+    local v = Config.AnimOverrides[tostring(animId)]
+    if v == nil then return nil end
+
+    if type(v) == "number" then
+        -- legacy single value
+        return v
+    end
+
+    if type(v) == "table" then
+        if breathKey and v.Breaths and v.Breaths[breathKey] ~= nil then
+            return tonumber(v.Breaths[breathKey])
+        end
+        if v.Default ~= nil then
+            return tonumber(v.Default)
+        end
+    end
+
+    return nil
+end
+
+local function SetAnimOverride(animId, breathKey, newPct, baseFallbackPct)
+    Config.AnimOverrides = Config.AnimOverrides or {}
+    animId = tostring(animId)
+
+    local cur = Config.AnimOverrides[animId]
+
+    -- If we were using group % and have no individual yet, create one.
+    -- This matches your current behavior (it already does this for numbers) :contentReference[oaicite:2]{index=2}
+    if type(cur) == "nil" then
+        if breathKey then
+            Config.AnimOverrides[animId] = {
+                Default = tonumber(baseFallbackPct) or 20,
+                Breaths = { [breathKey] = tonumber(newPct) }
+            }
+        else
+            Config.AnimOverrides[animId] = tonumber(newPct)
+        end
+        return
+    end
+
+    -- Legacy number → upgrade to table if we need Breath-specific
+    if type(cur) == "number" then
+        if breathKey then
+            Config.AnimOverrides[animId] = {
+                Default = tonumber(cur) or (tonumber(baseFallbackPct) or 20),
+                Breaths = { [breathKey] = tonumber(newPct) }
+            }
+        else
+            Config.AnimOverrides[animId] = tonumber(newPct)
+        end
+        return
+    end
+
+    -- Table form
+    if type(cur) == "table" then
+        if breathKey then
+            cur.Breaths = cur.Breaths or {}
+            cur.Breaths[breathKey] = tonumber(newPct)
+            cur.Default = tonumber(cur.Default) or (tonumber(baseFallbackPct) or 20)
+        else
+            cur.Default = tonumber(newPct)
+        end
+        Config.AnimOverrides[animId] = cur
+        return
+    end
+end
+
+
 
 -- ==============================================================================
 -- [FAILURE NOTIFICATION] (UPDATED)
@@ -1341,24 +1532,55 @@ local function SetupFailureDetection(char)
 
     -- Define Notification Logic
     local function NotifyFail(reason, lossAmount)
-        local diff = tick() - LastParryTime
-        
-        -- Window: 1.0s after parry attempt
-        if diff < 1.0 then 
-            local verdict = "Unknown"
-            
-            if diff < 0.35 then
-                verdict = "Too Late (Hit during startup/lag)"
-            else
-                verdict = "Too Early (Block expired)"
-            end
-            
-            -- Round loss for clean print
-            lossAmount = math.floor(lossAmount or 0)
-            
-           
-        end
+    local diff = tick() - LastParryTime
+
+    -- only consider it tied to our most recent parry attempt
+    if diff >= 1.0 then return end
+    if not Config.AutoAdjustEnabled then return end
+    if not LastParryAnimId then return end
+
+    -- Decide direction:
+    -- Health loss => DECREASE 1%
+    -- Posture loss => INCREASE 1%
+    local delta = 0
+    if reason == "Health Loss" then
+        delta = -1
+    elseif reason == "Posture Broken" then
+        delta = 1
+    else
+        return
     end
+
+    Config.AnimOverrides = Config.AnimOverrides or {}
+
+    -- If this animation was previously only using a group %,
+    -- create its own override the first time we need to adjust it.
+    local current = Config.AnimOverrides[LastParryAnimId]
+    if current == nil then
+        current = tonumber(LastParryUsedPct) or 20
+    end
+
+    local newPct = math.clamp((tonumber(current) or 20) + delta, 1, 99)
+    Config.AnimOverrides[LastParryAnimId] = newPct
+
+    SaveManager:Save()
+
+    -- Log + small notify (optional)
+    print(string.format(
+        "[AutoAdjust] %s | %s | %s => %d%%",
+        tostring(LastParryAnimId),
+        tostring(LastParryAnimName or "Unknown"),
+        tostring(reason),
+        newPct
+    ))
+
+    syde:Notify({
+        Title = "AutoAdjust Updated",
+        Content = (LastParryAnimName or "Animation") .. " => " .. tostring(newPct) .. "%",
+        Duration = 2
+    })
+end
+
 
     -- Health Tracking
     local lastHealth = hum.Health
@@ -1414,6 +1636,14 @@ local Window = syde:Init({
 })
 
 task.defer(function()
+    -- Only hide the loader if ANY autofarm is enabled
+    local slayerEnabled = (Config and Config.SpeedHubEnabled == true)
+    local demonEnabled = (getgenv().DemonAutoFarmEnabled == true)
+
+    if not (slayerEnabled or demonEnabled) then
+        return -- neither farm enabled → do nothing
+    end
+
     local CoreGui = game:GetService("CoreGui")
     local gui = CoreGui:FindFirstChild("sydeUILoader")
 
@@ -1421,6 +1651,7 @@ task.defer(function()
         gui.lib.Visible = false
     end
 end)
+
 
 
 
@@ -1438,8 +1669,340 @@ task.spawn(function()
 end)
 
 local MainTab = Window:InitTab({ Title = 'Main' })
+local AutoFarmTab = Window:InitTab({ Title = 'Auto Farm' }) -- ✅ NEW TAB
+
+
+
+local TeleportTab = Window:InitTab({ Title = 'Teleports + Bosses' }) -- ✅ NEW TAB
+--// ===== TELEPORT TAB BUTTONS (Teleporters + Boss Spawns) =====
+-- Put this inside wherever you set up `TeleportTab`
+
+local Players = game:GetService("Players")
+local lp = Players.LocalPlayer
+
+local function getHRP()
+    local char = lp.Character or lp.CharacterAdded:Wait()
+    return char:WaitForChild("HumanoidRootPart")
+end
+
+local function getTeleportCFrame(inst)
+    if inst:IsA("BasePart") then
+        return inst.CFrame
+    elseif inst:IsA("Model") then
+        if inst.PrimaryPart and inst.PrimaryPart:IsA("BasePart") then
+            return inst.PrimaryPart.CFrame
+        end
+        local part = inst:FindFirstChildWhichIsA("BasePart", true)
+        return part and part.CFrame or nil
+    end
+    return nil
+end
+
+local function tpTo(inst, yOffset)
+    local cf = getTeleportCFrame(inst)
+    if not cf then return end
+    local hrp = getHRP()
+    hrp.CFrame = cf + Vector3.new(0, yOffset or 6, 0)
+end
+
+-- =========================
+-- TELEPORTERS SECTION
+-- =========================
+TeleportTab:Section("Teleporters", "8932620770")
+
+local teleportersFolder = workspace:FindFirstChild("Teleporters")
+if teleportersFolder then
+    local kids = teleportersFolder:GetChildren()
+    table.sort(kids, function(a, b) return a.Name < b.Name end)
+
+    for _, tele in ipairs(kids) do
+    if tele:IsA("BasePart") then
+        TeleportTab:Button({
+            Title = tele.Name,
+            Description = "Teleport to " .. tele.Name,
+            CallBack = function()
+                tpTo(tele, 6)
+            end
+        })
+    end
+end
+
+else
+    TeleportTab:Button({
+        Title = "Teleporters folder not found",
+        Description = "workspace.Teleporters is missing",
+        CallBack = function() end
+    })
+end
+
+-- =========================
+-- BOSSES SECTION
+-- =========================
+TeleportTab:Section("Bosses", "8932620770")
+
+local bossSpawns = {}
+for _, inst in ipairs(workspace:GetDescendants()) do
+    if inst:IsA("BasePart") and inst.Name == "bossspawn" then
+        table.insert(bossSpawns, inst)
+    end
+end
+
+table.sort(bossSpawns, function(a, b)
+    local an = tostring(a:GetAttribute("BossToSpawn") or a.Name)
+    local bn = tostring(b:GetAttribute("BossToSpawn") or b.Name)
+    return an < bn
+end)
+
+if #bossSpawns > 0 then
+    for _, spawnPart in ipairs(bossSpawns) do
+        local bossName = tostring(spawnPart:GetAttribute("BossToSpawn") or "Boss")
+        TeleportTab:Button({
+            Title = bossName,
+            Description = "Teleport to " .. bossName .. " spawn",
+            CallBack = function()
+                tpTo(spawnPart, 8)
+            end
+        })
+    end
+else
+    TeleportTab:Button({
+        Title = "No Bosses",
+        Description = "No bosses here",
+        CallBack = function() end
+    })
+end
+
+-- =========================
+-- BOSS COMBAT LOCK TOGGLE BUTTON (no Y key)
+-- Put this UNDER the Bosses teleport buttons
+-- =========================
+
+getgenv().BossCombatLockEnabled = getgenv().BossCombatLockEnabled or false
+getgenv().BossCombatLockSetup = getgenv().BossCombatLockSetup or false
+
+TeleportTab:Section("Auto Boss", "8932620770")
+
+TeleportTab:Button({
+    Title = "Toggle Auto Boss",
+    Description = "ONLY ENABLE AFTER YOU ARE TELEPORTED TO BOSS AREA, Enable then walk to NPCS",
+    CallBack = function()
+        getgenv().BossCombatLockEnabled = not getgenv().BossCombatLockEnabled
+        syde:Notify({
+            Title = "Boss Combat Lock",
+            Content = getgenv().BossCombatLockEnabled and "Enabled" or "Disabled",
+            Duration = 2
+        })
+
+        -- If turning OFF, do cleanup immediately
+        if not getgenv().BossCombatLockEnabled and getgenv().BossCombatLockCleanup then
+            pcall(getgenv().BossCombatLockCleanup)
+        end
+    end
+})
+
+-- One-time setup: create the loop once, then the button just flips the flag
+if not getgenv().BossCombatLockSetup then
+    getgenv().BossCombatLockSetup = true
+
+    local Players = game:GetService("Players")
+    local Workspace = game:GetService("Workspace")
+    local RunService = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
+
+    local LocalPlayer = Players.LocalPlayer
+    local LiveFolder = Workspace:WaitForChild("Live")
+
+    local CombatCfg = {
+        Radius = 40,
+        Height = 10.5,
+        BackOffset = 0,
+        TweenTime = 0.001,
+    }
+
+    local currentTarget = nil
+    local inCombatLock = false
+
+    local function GetCharacterParts()
+        local char = LocalPlayer.Character
+        if not char then return nil, nil, nil end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        return char, hum, hrp
+    end
+
+    local function getNPCPrimaryPart(model)
+        if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+            return model.PrimaryPart
+        end
+        local hrp2 = model:FindFirstChild("HumanoidRootPart")
+        if hrp2 and hrp2:IsA("BasePart") then
+            return hrp2
+        end
+        return nil
+    end
+
+    local function isNPCModel(inst)
+        return inst
+            and inst:IsA("Model")
+            and inst.Name:sub(1, 4) == "NPC_"
+            and inst:IsDescendantOf(LiveFolder)
+    end
+
+    local function computeHoverCFrame(npcPart, height, backOffset)
+        local base = npcPart.CFrame
+        local pos = base.Position + base.UpVector * height + base.LookVector * backOffset
+        return CFrame.lookAt(pos, npcPart.Position)
+    end
+
+    local function tweenHRPTo(hrp, targetCF, tweenTime)
+        if not hrp or not hrp.Parent then return end
+        local t = TweenService:Create(
+            hrp,
+            TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { CFrame = targetCF }
+        )
+        t:Play()
+    end
+
+    local function setMovementLocked(isLocked)
+        local _, hum, _ = GetCharacterParts()
+        if not hum then return end
+        if isLocked then
+            hum.PlatformStand = true
+            hum.AutoRotate = false
+        else
+            hum.PlatformStand = false
+            hum.AutoRotate = true
+        end
+    end
+
+    local function FireCombatRemote()
+        local char = LocalPlayer.Character
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        if not char or not backpack then return end
+
+        local tool = char:FindFirstChild("Combat") or backpack:FindFirstChild("Combat")
+        if not tool then return end
+
+        -- ensure equipped
+        if tool.Parent == backpack then
+            local equipRemote = tool:FindFirstChild("ToggleEquip")
+            if equipRemote and equipRemote:IsA("RemoteEvent") then
+                pcall(function() equipRemote:FireServer(true) end)
+            end
+            tool.Parent = char
+        end
+
+        -- attack
+        local actRemote = tool:FindFirstChild("ToggleActivated")
+        if actRemote and actRemote:IsA("RemoteEvent") then
+            pcall(function() actRemote:FireServer(true) end)
+        end
+    end
+
+    local function SpamKeys()
+        local VirtualInputManager = game:GetService("VirtualInputManager")
+        local keys = {
+            Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four,
+            Enum.KeyCode.Five, Enum.KeyCode.Six, Enum.KeyCode.Seven,
+            Enum.KeyCode.Eight, Enum.KeyCode.Nine
+        }
+
+        for _, key in ipairs(keys) do
+            VirtualInputManager:SendKeyEvent(true, key, false, game)
+            task.wait()
+            VirtualInputManager:SendKeyEvent(false, key, false, game)
+        end
+    end
+
+    local function FindClosestNPC()
+        local _, _, hrp = GetCharacterParts()
+        if not hrp then return nil end
+
+        local closest = nil
+        local minDist = CombatCfg.Radius
+
+        for _, v in ipairs(LiveFolder:GetChildren()) do
+            if isNPCModel(v) then
+                local hum = v:FindFirstChild("Humanoid")
+                local root = getNPCPrimaryPart(v)
+                if hum and root and hum.Health > 0 then
+                    local dist = (root.Position - hrp.Position).Magnitude
+                    if dist < minDist then
+                        minDist = dist
+                        closest = v
+                    end
+                end
+            end
+        end
+        return closest
+    end
+
+    -- expose cleanup so OFF toggle can reset instantly
+    getgenv().BossCombatLockCleanup = function()
+        setMovementLocked(false)
+        inCombatLock = false
+        currentTarget = nil
+    end
+
+    -- Main loop (always connected once; runs only when enabled)
+    RunService.RenderStepped:Connect(function()
+        if not getgenv().BossCombatLockEnabled then return end
+
+        local _, hum, hrp = GetCharacterParts()
+        if not hrp or not hum or hum.Health <= 0 then
+            inCombatLock = false
+            return
+        end
+
+        -- validate target
+        if currentTarget then
+            local tHum = currentTarget:FindFirstChild("Humanoid")
+            local tRoot = getNPCPrimaryPart(currentTarget)
+
+            if not tHum or tHum.Health <= 0 or not tRoot
+                or (tRoot.Position - hrp.Position).Magnitude > CombatCfg.Radius + 10
+            then
+                currentTarget = nil
+                inCombatLock = false
+                setMovementLocked(false)
+            end
+        end
+
+        -- acquire target
+        if not currentTarget then
+            currentTarget = FindClosestNPC()
+        end
+
+        -- execute
+        if currentTarget then
+            local tRoot = getNPCPrimaryPart(currentTarget)
+            if tRoot then
+                if not inCombatLock then
+                    setMovementLocked(true)
+                    tweenHRPTo(hrp, computeHoverCFrame(tRoot, CombatCfg.Height, CombatCfg.BackOffset), CombatCfg.TweenTime)
+                    inCombatLock = true
+                else
+                    hrp.CFrame = computeHoverCFrame(tRoot, CombatCfg.Height, CombatCfg.BackOffset)
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                    hrp.AssemblyAngularVelocity = Vector3.zero
+                end
+
+                FireCombatRemote()
+                task.spawn(SpamKeys)
+            end
+        else
+            if inCombatLock then
+                setMovementLocked(false)
+                inCombatLock = false
+            end
+        end
+    end)
+end
+
+
+
 local BreathTab = Window:InitTab({ Title = 'Breaths' })
-local AutoFarmTab = Window:InitTab({ Title = 'AutoFarm' }) -- ✅ NEW TAB
 
 local DemonTab = Window:InitTab({ Title = 'Demons' }) -- [[ NEW TAB ]]
 local SkillTab = Window:InitTab({ Title = 'Skills' })
@@ -1447,15 +2010,68 @@ local SkillTab = Window:InitTab({ Title = 'Skills' })
 MainTab:Section('Toggles', '8932620770')
 
 
+local UserInputService = game:GetService("UserInputService")
+
+local function GetMouseXY()
+    local p = UserInputService:GetMouseLocation()
+    return math.floor(p.X), math.floor(p.Y)
+end
+
+local function SetSlotXY(slot, x, y)
+    Config.AutoFarmSlots = Config.AutoFarmSlots or {}
+    Config.AutoFarmSlots[slot] = Config.AutoFarmSlots[slot] or {}
+    Config.AutoFarmSlots[slot].X = tonumber(x)
+    Config.AutoFarmSlots[slot].Y = tonumber(y)
+    SaveManager:Save()
+
+    -- if editing currently selected slot, apply live
+    if tonumber(Config.AutoFarmSlot) == slot then
+        ApplyAutoFarmSlot(slot)
+    end
+end
+
+local function SetSlayerClickXY(x, y)
+    Config.ClickXY = Config.ClickXY or {}
+    Config.ClickXY.X = tonumber(x)
+    Config.ClickXY.Y = tonumber(y)
+    getgenv().SlayerClickX = tonumber(Config.ClickXY.X) or 814
+    getgenv().SlayerClickY = tonumber(Config.ClickXY.Y) or 631
+    SaveManager:Save()
+end
+
+local function SetDemonClickXY(x, y)
+    Config.ClickXY2 = Config.ClickXY2 or {}
+    Config.ClickXY2.X = tonumber(x)
+    Config.ClickXY2.Y = tonumber(y)
+    getgenv().DemonClickX = tonumber(Config.ClickXY2.X) or 771
+    getgenv().DemonClickY = tonumber(Config.ClickXY2.Y) or 650
+    SaveManager:Save()
+end
 
 
 
--- Shows current slot in UI text
-local function SlotLabel()
+
+-- Builds section title text
+local function GetSlotLabelText()
     return "AutoFarm Click Slot (Selected: Slot " .. tostring(Config.AutoFarmSlot or 1) .. ")"
 end
 
-AutoFarmTab:Section(SlotLabel(), "8932620770")
+-- Create the section ONCE
+local SlotSection = AutoFarmTab:Section(
+    GetSlotLabelText(),
+    "8932620770"
+)
+
+-- Call this whenever the slot changes
+local function UpdateSlotSection()
+    if SlotSection and SlotSection.SetTitle then
+        SlotSection:SetTitle(GetSlotLabelText())
+    elseif SlotSection and SlotSection.Title then
+        -- fallback for libs that expose Title directly
+        SlotSection.Title.Text = GetSlotLabelText()
+    end
+end
+
 
 -- Slot select buttons (radio behavior)
 AutoFarmTab:Button({
@@ -1490,6 +2106,33 @@ AutoFarmTab:Button({
     end
 })
 
+for slot = 1, 3 do
+    AutoFarmTab:Section("Slot " .. slot .. " Coordinates", "8932620770")
+
+    
+
+    AutoFarmTab:TextInput({
+        Title = "Slot " .. slot .. " X",
+        MaxSize = 6,
+        PlaceHolder = tostring((Config.AutoFarmSlots[slot] and Config.AutoFarmSlots[slot].X) or 900),
+        CallBack = function(v)
+            local curY = (Config.AutoFarmSlots[slot] and Config.AutoFarmSlots[slot].Y) or 700
+            SetSlotXY(slot, tonumber(v), curY)
+        end
+    })
+
+    AutoFarmTab:TextInput({
+        Title = "Slot " .. slot .. " Y",
+        MaxSize = 6,
+        PlaceHolder = tostring((Config.AutoFarmSlots[slot] and Config.AutoFarmSlots[slot].Y) or 700),
+        CallBack = function(v)
+            local curX = (Config.AutoFarmSlots[slot] and Config.AutoFarmSlots[slot].X) or 900
+            SetSlotXY(slot, curX, tonumber(v))
+        end
+    })
+end
+
+
 -- (Optional) quick view of current X/Y
 do
     local slot = tonumber(Config.AutoFarmSlot) or 1
@@ -1510,6 +2153,9 @@ do
     })
 end
 
+
+
+
 AutoFarmTab:Section("Enable", "8932620770")
 
 AutoFarmTab:Toggle({
@@ -1521,15 +2167,111 @@ AutoFarmTab:Toggle({
     end
 })
 
-MainTab:Toggle({
-    Title = 'Auto Parry',
-    Value = Config.ParryEnabled, -- ✅ load saved state
-    Config = false,
+AutoFarmTab:Section("Slayer Queue Position", "8932620770")
+
+
+
+AutoFarmTab:TextInput({
+    Title = "CLICK_X",
+    MaxSize = 6,
+    PlaceHolder = tostring((Config.ClickXY and Config.ClickXY.X) or 814),
     CallBack = function(v)
-        Config.ParryEnabled = v
-        SaveManager:Save() -- ✅ save immediately
+        local y = (Config.ClickXY and Config.ClickXY.Y) or 631
+        SetSlayerClickXY(tonumber(v), y)
     end
 })
+
+AutoFarmTab:TextInput({
+    Title = "Slayer Queue Y",
+    MaxSize = 6,
+    PlaceHolder = tostring((Config.ClickXY and Config.ClickXY.Y) or 631),
+    CallBack = function(v)
+        local x = (Config.ClickXY and Config.ClickXY.X) or 814
+        SetSlayerClickXY(x, tonumber(v))
+    end
+})
+
+-- Helper (only needs to exist once)
+local function StringToKeyCode(str)
+    if not str then return nil end
+    str = tostring(str)
+    return Enum.KeyCode[str:upper()] or Enum.KeyCode[str]
+end
+
+local function OnAutoParryKeyChanged(newKey)
+    -- newKey might be Enum.KeyCode OR a string depending on Syde fork
+    if typeof(newKey) == "EnumItem" then
+        Config.AutoParryKey = newKey.Name
+    else
+        Config.AutoParryKey = tostring(newKey)
+    end
+
+    SaveManager:Save()
+
+    syde:Notify({
+        Title = "Keybind Updated",
+        Content = "Auto Parry key set to " .. tostring(Config.AutoParryKey),
+        Duration = 2
+    })
+end
+
+MainTab:Keybind({
+    Title = "Toggle Auto Parry",
+    Key = StringToKeyCode(Config.AutoParryKey) or Enum.KeyCode.Semicolon,
+
+    CallBack = function()
+        Config.ParryEnabled = not Config.ParryEnabled
+        SaveManager:Save()
+
+        syde:Notify({
+            Title = "Auto Parry",
+            Content = Config.ParryEnabled and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end,
+
+    -- Different Syde forks use different names — include all:
+    ChangedCallback = OnAutoParryKeyChanged,
+    OnChanged       = OnAutoParryKeyChanged,
+    Changed         = OnAutoParryKeyChanged,
+    KeyChanged      = OnAutoParryKeyChanged,
+})
+
+
+MainTab:Toggle({
+    Title = "Ignore Same Race",
+    Value = (Config.IgnoreSameRace == true),
+    Config = false,
+    CallBack = function(v)
+        Config.IgnoreSameRace = (v == true)
+        SaveManager:Save()
+
+        syde:Notify({
+            Title = "Ignore Same Race",
+            Content = Config.IgnoreSameRace and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+
+
+--[[
+MainTab:Toggle({
+    Title = "Automatic Adjustment",
+    Value = Config.AutoAdjustEnabled,
+    Config = false,
+    CallBack = function(v)
+        Config.AutoAdjustEnabled = (v == true)
+        SaveManager:Save()
+        syde:Notify({
+            Title = "Automatic Adjustment",
+            Content = Config.AutoAdjustEnabled and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+]]
 
 AutoFarmTab:Toggle({
     Title = "Demon Autofarm",
@@ -1556,6 +2298,63 @@ AutoFarmTab:Toggle({
     end
 })
 
+AutoFarmTab:Section("Demon Farm Queue Position", "8932620770")
+
+
+
+AutoFarmTab:TextInput({
+    Title = "Demon Queue X",
+    MaxSize = 6,
+    PlaceHolder = tostring((Config.ClickXY2 and Config.ClickXY2.X) or 771),
+    CallBack = function(v)
+        local y = (Config.ClickXY2 and Config.ClickXY2.Y) or 650
+        SetDemonClickXY(tonumber(v), y)
+    end
+})
+
+AutoFarmTab:TextInput({
+    Title = "Demon Queue Y",
+    MaxSize = 6,
+    PlaceHolder = tostring((Config.ClickXY2 and Config.ClickXY2.Y) or 650),
+    CallBack = function(v)
+        local x = (Config.ClickXY2 and Config.ClickXY2.X) or 771
+        SetDemonClickXY(x, tonumber(v))
+    end
+})
+
+-- ===== Mouse XY Notifier (UNDER Demon Queue Y) =====
+getgenv().MouseXYNotifyEnabled = getgenv().MouseXYNotifyEnabled or false
+
+AutoFarmTab:Toggle({
+    Title = "Show Mouse Possition",
+    Value = getgenv().MouseXYNotifyEnabled,
+    Config = false,
+    CallBack = function(v)
+        getgenv().MouseXYNotifyEnabled = (v == true)
+        syde:Notify({
+            Title = "Mouse XY Notifier",
+            Content = getgenv().MouseXYNotifyEnabled and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+AutoFarmTab:Keybind({
+    Title = "Show Mouse Pos Button",
+    Key = Enum.KeyCode.KeypadNine, -- default: Numpad 9
+    CallBack = function()
+        if not getgenv().MouseXYNotifyEnabled then return end
+        local mx, my = GetMouseXY()
+        syde:Notify({
+            Title = "Mouse XY",
+            Content = tostring(mx) .. ", " .. tostring(my),
+            Duration = 2
+        })
+    end
+})
+
+
+
 
 
 MainTab:Toggle({
@@ -1565,17 +2364,6 @@ MainTab:Toggle({
     CallBack = function(v) Config.ESPEnabled = v end
 })
 
-MainTab:Section('Actions', '8932620770')
-
-MainTab:Button({
-    Title = 'Reload Animations',
-    Description = 'Reloads NPC, Combat & Skill Anims',
-    CallBack = function()
-        if getgenv().LoadValidAnimations then
-            getgenv().LoadValidAnimations()
-        end
-    end,
-})
 
 MainTab:Section('Global', '8932620770')
 MainTab:CreateSlider({
@@ -1727,6 +2515,7 @@ Config.CombatAnimIdToName = {}
             if obj:IsA("Animation") then
                 local animId = tostring(obj.AnimationId)
                 Config.ValidAnimationIds[animId] = category
+    print(string.format("[AnimLog] %s | %s | %s", tostring(category), tostring(obj.Name), tostring(animId)))
 
 				-- ✅ Build NPC ID -> Name mapping from NPCAnimPacks
 if category == "NPC" then
@@ -1764,12 +2553,44 @@ end
 end
 
 -- ==============================================================================
--- [ESP LOGIC] (Updated with Lifeforce)
+-- [ESP LOGIC] (Stylized Bars + Lifeforce Red)
 -- ==============================================================================
+
+local TweenService = game:GetService("TweenService")
+
 local function UpdateBar(frame, current, max)
     if max <= 0 then max = 1 end
     local percent = math.clamp(current / max, 0, 1)
-    frame.Size = UDim2.new(1, 0, percent, 0)
+
+    TweenService:Create(
+        frame,
+        TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { Size = UDim2.new(1, 0, percent, 0) }
+    ):Play()
+end
+
+local function StyleBar(bg, fill, gradientColors)
+    -- Rounded corners
+    local c1 = Instance.new("UICorner")
+    c1.CornerRadius = UDim.new(0.4, 0)
+    c1.Parent = bg
+
+    local c2 = Instance.new("UICorner")
+    c2.CornerRadius = UDim.new(0.4, 0)
+    c2.Parent = fill
+
+    -- Outline
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(0, 0, 0)
+    stroke.Thickness = 1
+    stroke.Transparency = 0.4
+    stroke.Parent = bg
+
+    -- Gradient
+    local grad = Instance.new("UIGradient")
+    grad.Rotation = 90
+    grad.Color = gradientColors
+    grad.Parent = fill
 end
 
 local function CreateESP(character)
@@ -1794,47 +2615,67 @@ local function CreateESP(character)
     billboard.AlwaysOnTop = true
     billboard.Parent = rootPart
 
-    -- [[ 1. HEALTH BAR ]]
+    -- =========================
+    -- HEALTH BAR
+    -- =========================
     local healthBg = Instance.new("Frame")
-    healthBg.Name = "HealthBG"
-    healthBg.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    healthBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    healthBg.BackgroundTransparency = 0.1
     healthBg.BorderSizePixel = 0
-    healthBg.Size = UDim2.new(0.1, 0, 1.15, 0)
+    healthBg.Size = UDim2.new(0.1, 0, 1.3, 0)
     healthBg.Position = UDim2.new(0.15, 0, -0.075, 0)
     healthBg.Parent = billboard
 
     local healthFill = Instance.new("Frame")
-    healthFill.Name = "Fill"
-    healthFill.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
-    healthFill.BorderSizePixel = 0
     healthFill.AnchorPoint = Vector2.new(0, 1)
     healthFill.Position = UDim2.new(0, 0, 1, 0)
     healthFill.Size = UDim2.new(1, 0, 1, 0)
+    healthFill.BorderSizePixel = 0
     healthFill.Parent = healthBg
 
-    -- [[ 2. LIFEFORCE BAR (ADDED) ]]
+    StyleBar(
+        healthBg,
+        healthFill,
+        ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 90, 40)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 220, 100)),
+        })
+    )
+
+    -- =========================
+    -- LIFEFORCE BAR (RED)
+    -- =========================
     local lifeBg = Instance.new("Frame")
-    lifeBg.Name = "LifeForceBG"
-    lifeBg.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    lifeBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    lifeBg.BackgroundTransparency = 0.1
     lifeBg.BorderSizePixel = 0
     lifeBg.Size = UDim2.new(0.1, 0, 1, 0)
     lifeBg.Position = UDim2.new(0.45, 0, 0, 0)
-    lifeBg.Visible = false -- Hidden by default until found
+    lifeBg.Visible = false
     lifeBg.Parent = billboard
 
     local lifeFill = Instance.new("Frame")
-    lifeFill.Name = "Fill"
-    lifeFill.BackgroundColor3 = Color3.fromRGB(255, 170, 255) -- Red for Lifeforce
-    lifeFill.BorderSizePixel = 0
     lifeFill.AnchorPoint = Vector2.new(0, 1)
     lifeFill.Position = UDim2.new(0, 0, 1, 0)
     lifeFill.Size = UDim2.new(1, 0, 1, 0)
+    lifeFill.BorderSizePixel = 0
     lifeFill.Parent = lifeBg
 
-    -- [[ 3. POSTURE BAR ]]
+    StyleBar(
+        lifeBg,
+        lifeFill,
+        ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(90, 0, 0)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 60, 60)),
+        })
+    )
+
+    -- =========================
+    -- POSTURE BAR
+    -- =========================
     local postureBg = Instance.new("Frame")
-    postureBg.Name = "PostureBG"
-    postureBg.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    postureBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    postureBg.BackgroundTransparency = 0.1
     postureBg.BorderSizePixel = 0
     postureBg.Size = UDim2.new(0.1, 0, 1, 0)
     postureBg.Position = UDim2.new(0.75, 0, 0, 0)
@@ -1842,23 +2683,30 @@ local function CreateESP(character)
     postureBg.Parent = billboard
 
     local postureFill = Instance.new("Frame")
-    postureFill.Name = "Fill"
-    postureFill.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
-    postureFill.BorderSizePixel = 0
     postureFill.AnchorPoint = Vector2.new(0, 1)
     postureFill.Position = UDim2.new(0, 0, 1, 0)
     postureFill.Size = UDim2.new(1, 0, 1, 0)
+    postureFill.BorderSizePixel = 0
     postureFill.Parent = postureBg
 
-    -- [[ CONNECTIONS ]]
+    StyleBar(
+        postureBg,
+        postureFill,
+        ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 90, 0)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 215, 0)),
+        })
+    )
 
-    -- Health
+    -- =========================
+    -- CONNECTIONS
+    -- =========================
+
     humanoid.HealthChanged:Connect(function()
         UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
     end)
     UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
 
-    -- Lifeforce (Search recursively)
     local lifeforce = character:FindFirstChild("Lifeforce", true)
     if lifeforce then
         lifeBg.Visible = true
@@ -1866,22 +2714,8 @@ local function CreateESP(character)
             UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
         end)
         UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
-    else
-        -- Sometimes it loads late, check again briefly
-        task.delay(1, function()
-            if not character then return end
-            lifeforce = character:FindFirstChild("Lifeforce", true)
-            if lifeforce then
-                lifeBg.Visible = true
-                lifeforce.Changed:Connect(function()
-                    UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
-                end)
-                UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
-            end
-        end)
     end
 
-    -- Posture (Search recursively)
     local posture = character:FindFirstChild("Posture", true)
     if posture then
         postureBg.Visible = true
@@ -1889,57 +2723,121 @@ local function CreateESP(character)
             UpdateBar(postureFill, posture.Value, posture.MaxValue)
         end)
         UpdateBar(postureFill, posture.Value, posture.MaxValue)
-    else
-        postureBg.Visible = false
     end
 end
 
+
 -- ======================================================================
--- [RANGE VISUALIZER]
+-- [RANGE VISUALIZER] (Directional + only shows when enemy is facing you)
 -- ======================================================================
 local RangeVisual = {}
+
+local function GetLocalRoot()
+    local myChar = LocalPlayer.Character
+    if not myChar then return nil end
+    return GetRoot(myChar)
+end
+
+local function IsFacingLocalPlayer(enemyChar)
+    local myRoot = GetLocalRoot()
+    if not myRoot then return false end
+    return IsFacing(enemyChar, myRoot.Position)
+end
 
 function RangeVisual:Create(char, color, range)
     local root = GetRoot(char)
     if not root then return nil end
 
-    local p = Instance.new("Part")
-    p.Name = "AnimRangeVisual"
-    p.Anchored = true
-    p.CanCollide = false
-    p.CanQuery = false
-    p.CanTouch = false
-    p.Material = Enum.Material.Neon
-    p.Color = color
-    p.Transparency = 0.9
-    p.Shape = Enum.PartType.Cylinder
-    p.Size = Vector3.new(0.15, (range * 2), (range * 2))
-    p.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, 0, math.rad(90))
-    p.Parent = Workspace
-    return p
+    -- Holder folder so we can destroy cleanly
+    local folder = Instance.new("Folder")
+    folder.Name = "AnimRangeVisualFolder"
+    folder.Parent = Workspace
+
+    -- Range circle (cylinder)
+    local ring = Instance.new("Part")
+    ring.Name = "AnimRangeRing"
+    ring.Anchored = true
+    ring.CanCollide = false
+    ring.CanQuery = false
+    ring.CanTouch = false
+    ring.Material = Enum.Material.Neon
+    ring.Color = color
+    ring.Transparency = 0.9
+    ring.Shape = Enum.PartType.Cylinder
+    ring.Size = Vector3.new(0.15, (range * 2), (range * 2))
+    ring.Parent = folder
+
+    -- Direction arrow (thin rectangle pointing forward)
+    local arrow = Instance.new("Part")
+    arrow.Name = "AnimRangeArrow"
+    arrow.Anchored = true
+    arrow.CanCollide = false
+    arrow.CanQuery = false
+    arrow.CanTouch = false
+    arrow.Material = Enum.Material.Neon
+    arrow.Color = color
+    arrow.Transparency = 0.15
+    arrow.Size = Vector3.new(range, 0.18, 0.6) -- length = range
+    arrow.Parent = folder
+
+    -- Make arrow rounded-ish
+    local arrowCorner = Instance.new("UICorner")
+    arrowCorner.CornerRadius = UDim.new(0.25, 0)
+    arrowCorner.Parent = arrow
+
+    return {
+        Folder = folder,
+        Ring = ring,
+        Arrow = arrow,
+    }
 end
 
 function RangeVisual:BindToTrack(char, track, color, range)
     local root = GetRoot(char)
     if not root or not track then return end
 
-    local part = self:Create(char, color, range)
-    if not part then return end
+    local vis = self:Create(char, color, range)
+    if not vis then return end
 
     local hbConn
     hbConn = RunService.Heartbeat:Connect(function()
         if not track.IsPlaying or not root.Parent then
             if hbConn then hbConn:Disconnect() end
-            if part then part:Destroy() end
+            if vis and vis.Folder then vis.Folder:Destroy() end
             return
         end
+
         local pos = root.Position
-        part.CFrame = CFrame.new(Vector3.new(pos.X, pos.Y - 2.5, pos.Z)) * CFrame.Angles(0, 0, math.rad(90))
+        local y = pos.Y - 2.5
+
+        -- Only show when they're facing the LocalPlayer
+        local show = IsFacingLocalPlayer(char)
+
+        -- Update ring position (flat on ground)
+        vis.Ring.Transparency = show and 0.9 or 1
+        vis.Ring.CFrame = CFrame.new(Vector3.new(pos.X, y, pos.Z)) * CFrame.Angles(0, 0, math.rad(90))
+
+        -- Update arrow orientation (points where HRP is looking on XZ plane)
+        -- Flatten lookvector so it doesn't tilt up/down
+        local look = root.CFrame.LookVector
+        local flatLook = Vector3.new(look.X, 0, look.Z)
+        if flatLook.Magnitude < 0.01 then
+            flatLook = Vector3.new(0, 0, -1)
+        else
+            flatLook = flatLook.Unit
+        end
+
+        -- Place arrow so it starts near center and extends forward
+        local base = Vector3.new(pos.X, y + 0.05, pos.Z)
+        local forwardCenter = base + flatLook * (range * 0.5)
+
+        vis.Arrow.Transparency = show and 0.15 or 1
+        vis.Arrow.CFrame = CFrame.lookAt(forwardCenter, forwardCenter + flatLook)
     end)
 
     track.Stopped:Connect(function()
         if hbConn then hbConn:Disconnect() end
-        if part then part:Destroy() end
+        if vis and vis.Folder then vis.Folder:Destroy() end
     end)
 end
 
@@ -1997,9 +2895,12 @@ local success, err = pcall(function()
     local W_SPAM_SPEED = 0.08
 
     -- Fixed click positions
-    local CLICK_X2, CLICK_Y2 = 771, 650
-	-- Backwards-compat for any older code still using CLICK_X / CLICK_Y
-local CLICK_X, CLICK_Y = CLICK_X2, CLICK_Y2
+    local function getDemonClickXY()
+    local x = tonumber(getgenv().DemonClickX) or 771
+    local y = tonumber(getgenv().DemonClickY) or 650
+    return x, y
+end
+
 
     local VE_TOP_X, VE_TOP_Y = 1889, 50
     local EMPTY_LIVE_X, EMPTY_LIVE_Y = 900, 629
@@ -2550,7 +3451,10 @@ task.spawn(function()
 
         VirtualPressKey(Enum.KeyCode.V, 0.05)
         task.wait(0.15)
-VirtualClickAtScaled(CLICK_X2, CLICK_Y2)
+
+        local cx, cy = getDemonClickXY()
+        VirtualClickAtScaled(cx, cy)
+
     end
 
 end)
@@ -2677,7 +3581,7 @@ end)
 
 
 -- ==============================================================================
--- [PARRY CORE - MONITOR] (FAST RECOVERY FIX)
+-- [PARRY CORE - MONITOR] (ONLY REACT IF THEY'RE FACING YOU)
 -- ==============================================================================
 local function MonitorAndBlock(track, char, animId, animName, settings)
     -- Name Resolution
@@ -2693,7 +3597,6 @@ local function MonitorAndBlock(track, char, animId, animName, settings)
     local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
     local pingNumber = tonumber(ping:match("%d+")) or 50
     local pingOffset = (pingNumber / 1000) * 8
-    
     triggerPct = math.clamp(triggerPct - pingOffset, 1, 99)
 
     -- Visuals
@@ -2704,7 +3607,7 @@ local function MonitorAndBlock(track, char, animId, animName, settings)
     -- State
     local isFeinted = false
     local connections = {}
-    
+
     -- Specific Ignore Color (Hyperarmor/Orange)
     local ignoreColor = Color3.fromRGB(255, 150, 30)
 
@@ -2714,27 +3617,17 @@ local function MonitorAndBlock(track, char, animId, animName, settings)
     end))
 
     -- [[ 2. DETECT NEW HIGHLIGHT (Visual Feint) ]]
-    -- We ONLY listen for NEW highlights added during this specific animation.
-    -- We do NOT check existing highlights to prevent "old" feint effects from blocking new attacks.
     table.insert(connections, char.ChildAdded:Connect(function(child)
         if child:IsA("Highlight") then
-            -- Check 1: Ignore our own highlight
             if child.Name == "ParryHub_HL" or child:GetAttribute("ParryHubOwned") then return end
-            
-            -- Check 2: Ignore specific Orange color (255, 150, 30)
             if child.FillColor == ignoreColor then return end
-
-            -- If it passed checks, it is a real feint for THIS attack
             isFeinted = true
         end
     end))
 
     while track.IsPlaying do
-        -- IMMEDIATE ABORT
+        if not Config.ParryEnabled then break end
         if isFeinted then break end
-
-        -- [[ REMOVED HasExternalHighlight CHECK ]] 
-        -- This prevents lingering highlights from the previous feint causing us to ignore the NEXT attack.
 
         local myChar = LocalPlayer.Character
         if not myChar then break end
@@ -2747,23 +3640,30 @@ local function MonitorAndBlock(track, char, animId, animName, settings)
         local pos = track.TimePosition
         local percent = 0
         if length > 0 then percent = (pos / length) * 100 end
-
         if percent >= 98 then break end
 
         local dist = (enemyRoot.Position - myRoot.Position).Magnitude
+
+        -- ✅ NEW: ALWAYS require facing (no more distance-based facing requirement)
         local facing = IsFacing(char, myRoot.Position)
-        local requireFacing = dist > (range * 0.6)
+        if not facing then
+            RunService.Heartbeat:Wait()
+            continue
+        end
 
         -- [[ TRIGGER LOGIC ]]
-        if dist <= range and (not requireFacing or facing) and percent >= triggerPct then
-            
-            -- Final Safety Checks
+        if dist <= range and percent >= triggerPct then
+            if not Config.ParryEnabled then break end
             if not track.IsPlaying or isFeinted then break end
             if IsPlayerBusyCombatAnim() then break end
 
             -- BLOCK ACTION
             BlockRemote:FireServer()
-            
+
+            LastParryAnimId = tostring(animId)
+            LastParryUsedPct = triggerPct
+            LastParryAnimName = animName
+
             LastParryTime = tick()
             LastSkillParried = Config.SkillAnimIdToName[tostring(animId)] or animName or "Unknown"
 
@@ -2780,15 +3680,16 @@ local function MonitorAndBlock(track, char, animId, animName, settings)
 
             break
         end
+
         RunService.Heartbeat:Wait()
     end
 
-    -- [[ AGGRESSIVE CLEANUP ]]
-    -- Ensure we don't leave any listeners active that could mess with the next track
+    -- Cleanup
     for _, conn in ipairs(connections) do
         conn:Disconnect()
     end
 end
+
 
 -- ==============================================================================
 -- [PARRY CORE - ON ANIM PLAYED] (UPDATED)
@@ -2817,6 +3718,44 @@ local function ShouldIgnoreCombatAnim(name: string?): boolean
     return false
 end
 
+local function GetLiveModelByPlayer()
+    local live = Workspace:FindFirstChild("Live")
+    if not live then return nil end
+
+    -- Common patterns: "LocalPlayer" model OR player's name model
+    return live:FindFirstChild("LocalPlayer") or live:FindFirstChild(LocalPlayer.Name)
+end
+
+local function GetMyRace()
+    local m = GetLiveModelByPlayer()
+    local r = m and m:GetAttribute("Race")
+    if r ~= nil and tostring(r) ~= "" then
+        return tostring(r)
+    end
+
+    -- fallback (just in case)
+    local c = LocalPlayer.Character
+    local r2 = c and c:GetAttribute("Race")
+    if r2 ~= nil and tostring(r2) ~= "" then
+        return tostring(r2)
+    end
+
+    return nil
+end
+
+local function ShouldIgnoreSameRace(enemyChar)
+    if not Config.IgnoreSameRace then return false end
+    if not enemyChar then return false end
+
+    local myRace = GetMyRace()
+    if not myRace then return false end
+
+    local enemyRace = enemyChar:GetAttribute("Race")
+    if enemyRace == nil or tostring(enemyRace) == "" then return false end
+
+    return tostring(enemyRace) == myRace
+end
+
 
 
 local function OnAnimationPlayed(char, track)
@@ -2825,9 +3764,17 @@ local function OnAnimationPlayed(char, track)
     local myChar = LocalPlayer.Character
     if not myChar or char == myChar then return end
 
+     -- ✅ NEW: ignore same-race
+    if ShouldIgnoreSameRace(char) then
+        return
+    end
+
+
     local myRoot = GetRoot(myChar)
     local enemyRoot = GetRoot(char)
     if not myRoot or not enemyRoot then return end
+
+
 
     if not track.Animation then return end
 
@@ -2912,12 +3859,26 @@ local function OnAnimationPlayed(char, track)
         cleanName = npcAnimName
     end
 
+    -- FINAL: per-animation override takes priority over grouped default
+
+
+    do
+    local breathKeyForOverride = GetBreathOnlyVariantKey(char) -- nil if StyleBDA OR no Breath string
+    local ov = GetAnimOverride(animId, breathKeyForOverride)
+    if ov ~= nil then
+        reaction = tonumber(ov) or reaction
+    end
+end
+
+
     local sessionSettings = {
         Range = range,
         ReactionPct = reaction,
         Color = color,
         Type = catName
     }
+
+    
 
     task.spawn(function()
         MonitorAndBlock(track, char, animId, cleanName, sessionSettings)
