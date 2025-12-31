@@ -79,6 +79,11 @@ CombatIgnoreWords = {
     "Idle",
     "Parry",
     "walk",
+    "Run",
+    "Front",
+    "Back",
+    "Left",
+    "Right",
     "ShakeBlock",
     "SheatheBack",
     "SheatheHip",
@@ -229,6 +234,8 @@ AnimOverrides = Config.AnimOverrides or {},
         IgnoreSameRace = (Config.IgnoreSameRace == true),
         ClickXY = Config.ClickXY,
         ClickXY2 = Config.ClickXY2,
+        ESPEnabled = (Config.ESPEnabled == true),
+
 
 		
 		DemonAutoFarmEnabled = (getgenv().DemonAutoFarmEnabled == true),
@@ -364,6 +371,11 @@ if result.ParryEnabled ~= nil then
 end
 
 
+if result.ESPEnabled ~= nil then
+    Config.ESPEnabled = (result.ESPEnabled == true)
+end
+
+
             -- SpeedHub toggle
             if result.SpeedHubEnabled ~= nil then
                 Config.SpeedHubEnabled = result.SpeedHubEnabled
@@ -487,6 +499,8 @@ local function getEmptyLiveXY()
     local y = tonumber(getgenv().AutoFarmEmptyLiveY) or 700
     return x, y
 end
+
+
 
 	-- Intervals
 	local VILLAGER_ESCORT_INTERVAL = 2
@@ -2358,10 +2372,18 @@ AutoFarmTab:Keybind({
 
 
 MainTab:Toggle({
-    Title = 'ESP Visuals',
-    Value = true,
+    Title = "ESP",
+    Value = (Config.ESPEnabled == true),
     Config = false,
-    CallBack = function(v) Config.ESPEnabled = v end
+    CallBack = function(v)
+        ApplyESPState(v)
+
+        syde:Notify({
+            Title = "ESP Visuals",
+            Content = (Config.ESPEnabled and "Enabled" or "Disabled"),
+            Duration = 2
+        })
+    end
 })
 
 
@@ -2551,6 +2573,66 @@ end
         Duration = 5
     })
 end
+
+local function RemoveESPFromCharacter(character)
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    -- Delete BOTH billboards (your separate health gui + status gui)
+    local a = rootPart:FindFirstChild("StatusESP")
+    if a then a:Destroy() end
+
+    local b = rootPart:FindFirstChild("HealthESP")
+    if b then b:Destroy() end
+end
+
+local function RemoveAllESP()
+    -- Players
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            RemoveESPFromCharacter(p.Character)
+        end
+    end
+
+    -- Target folder models (NPCs etc)
+    if Config.TargetFolder then
+        for _, child in ipairs(Config.TargetFolder:GetChildren()) do
+            if child:IsA("Model") then
+                RemoveESPFromCharacter(child)
+            end
+        end
+    end
+end
+
+local function CreateESPForEveryone()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            task.spawn(function() CreateESP(p.Character) end)
+        end
+    end
+
+    if Config.TargetFolder then
+        for _, child in ipairs(Config.TargetFolder:GetChildren()) do
+            if child:IsA("Model") then
+                task.spawn(function() CreateESP(child) end)
+            end
+        end
+    end
+end
+
+local function ApplyESPState(enabled)
+    enabled = (enabled == true)
+    Config.ESPEnabled = enabled
+    SaveManager:Save()
+
+    if not enabled then
+        RemoveAllESP()
+    else
+        CreateESPForEveryone()
+    end
+end
+
 
 -- ==============================================================================
 -- [ESP LOGIC] (Stylized Bars + Lifeforce Red)
