@@ -34,7 +34,7 @@ if not success or not syde then
     syde = loadstring(game:HttpGet("https://raw.githubusercontent.com/1201for/Syde/main/source.lua"))()
 end
 
-if not syde then return warn("Both library links failed.") end
+if not syde then return warn("Fail") end
 
 -- ==============================================================================
 -- [2] SERVICES & CONFIG
@@ -1580,13 +1580,6 @@ local function SetupFailureDetection(char)
     SaveManager:Save()
 
     -- Log + small notify (optional)
-    print(string.format(
-        "[AutoAdjust] %s | %s | %s => %d%%",
-        tostring(LastParryAnimId),
-        tostring(LastParryAnimName or "Unknown"),
-        tostring(reason),
-        newPct
-    ))
 
     syde:Notify({
         Title = "AutoAdjust Updated",
@@ -2682,10 +2675,10 @@ Config.CombatAnimIdToName = {}
     Config.SkillNameToAnimId = {}
 
     local Assets = ReplicatedStorage:WaitForChild("Assets", 10)
-    if not Assets then return warn("No Assets folder") end
+    if not Assets then return warn("No Assets") end
 
     local Anims = Assets:WaitForChild("Animations", 10)
-    if not Anims then return warn("No Animations folder") end
+    if not Anims then return warn("No Animations") end
 
     local function Scan(folder, category)
         if not folder then return end
@@ -2693,7 +2686,6 @@ Config.CombatAnimIdToName = {}
             if obj:IsA("Animation") then
                 local animId = tostring(obj.AnimationId)
                 Config.ValidAnimationIds[animId] = category
-    print(string.format("[AnimLog] %s | %s | %s", tostring(category), tostring(obj.Name), tostring(animId)))
 
 				-- ✅ Build NPC ID -> Name mapping from NPCAnimPacks
 if category == "NPC" then
