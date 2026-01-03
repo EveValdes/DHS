@@ -1,8 +1,23 @@
-local gameId = game.GameId
+local placeId = game.PlaceId
 
-if gameId == 11641576792 then
+local DEMH_PLACE_IDS = {
+    [11641576792] = true,
+    [112419751866879] = true,
+    [18256032853] = true,
+    [17762519470] = true,
+    [17231846331] = true,
+    [15579893509] = true,
+    [15240226383] = true,
+    [15002032516] = true,
+    [14970367103] = true,
+    [14220582083] = true,
+    [14220581884] = true,
+    [14220581641] = true,
+    [14220581261] = true,
+}
+
+if DEMH_PLACE_IDS[placeId] then
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EveValdes/DHS/refs/heads/main/DemH"))()
-
-elseif gameId ~= 131079272918660 then
+else
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EveValdes/DHS/refs/heads/main/DevilH"))()
 end
