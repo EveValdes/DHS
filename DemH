@@ -2415,12 +2415,15 @@ local function ApplyESPState(enabled)
     Config.ESPEnabled = enabled
     SaveManager:Save()
 
+    SetupESPHooks()
+
     if enabled then
         CreateESPForEveryone()
     else
         RemoveAllESP()
     end
 end
+
 -- ===== ESP Re-enable Safe System =====
 local ESPHooksSetup = false
 
@@ -2824,6 +2827,8 @@ local function StyleBar(bg, fill, gradientColors)
     grad.Parent = fill
 end
 
+
+
 local function CreateESP(character)
     if not Config.ESPEnabled then return end
     if character == LocalPlayer.Character then return end
@@ -2833,8 +2838,8 @@ local function CreateESP(character)
         if not race or race == "Human" then return end
     end
 
-    local rootPart = character:WaitForChild("HumanoidRootPart", 5)
-    local humanoid = character:WaitForChild("Humanoid", 5)
+    local rootPart = character:WaitForChild("HumanoidRootPart", 12)
+    local humanoid = character:WaitForChild("Humanoid", 12)
     if not rootPart or not humanoid then return end
     if rootPart:FindFirstChild("StatusESP") then return end
 
@@ -2938,25 +2943,118 @@ local function CreateESP(character)
     end)
     UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
 
-    local lifeforce = character:FindFirstChild("Lifeforce", true)
-    if lifeforce then
-        lifeBg.Visible = true
-        lifeforce.Changed:Connect(function()
-            UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
-        end)
-        UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
+    -- =========================
+-- CONNECTIONS (FIXED: WAIT FOR VALUES + HANDLE LATE SPAWN)
+-- =========================
+
+-- prevent duplicate binds per character
+character:SetAttribute("StatusESP_Bound", true)
+
+-- Health (humanoid always exists once we got here)
+local healthConn
+healthConn = humanoid.HealthChanged:Connect(function()
+    if not billboard.Parent then
+        if healthConn then healthConn:Disconnect() end
+        return
+    end
+    UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
+end)
+UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
+
+-- helper: wait for a descendant by name (non-yielding loop so we can timeout)
+local function WaitForDescendantByName(root, name, timeout)
+    local t0 = os.clock()
+    while root and root.Parent and (os.clock() - t0) < (timeout or 10) do
+        local found = root:FindFirstChild(name, true)
+        if found then return found end
+        task.wait(0.2)
+    end
+    return nil
+end
+
+-- helper: binds a NumberValue-like bar (Value + MaxValue)
+local function BindValueBar(valueObj, bgFrame, fillFrame)
+    if not valueObj or not valueObj.Parent then return end
+
+    bgFrame.Visible = true
+
+    local function getMax()
+        local mv = valueObj:FindFirstChild("MaxValue")
+        if mv and mv:IsA("NumberValue") then
+            return mv.Value
+        end
+        -- some games store MaxValue as attribute
+        local att = valueObj:GetAttribute("MaxValue")
+        if typeof(att) == "number" then
+            return att
+        end
+        -- fallback: if object has MaxValue property
+        if valueObj.MaxValue ~= nil then
+            return valueObj.MaxValue
+        end
+        return 100
     end
 
-    local posture = character:FindFirstChild("Posture", true)
-    if posture then
-        postureBg.Visible = true
-        posture.Changed:Connect(function()
-            UpdateBar(postureFill, posture.Value, posture.MaxValue)
+    local function update()
+        local cur = valueObj.Value
+        local mx = getMax()
+        UpdateBar(fillFrame, cur, mx)
+    end
+
+    -- update now + on changes
+    update()
+
+    local conn1 = valueObj.Changed:Connect(function()
+        if not bgFrame.Parent then
+            if conn1 then conn1:Disconnect() end
+            return
+        end
+        update()
+    end)
+
+    -- also watch MaxValue changes if it exists as a child NumberValue
+    local mv = valueObj:FindFirstChild("MaxValue")
+    if mv and mv:IsA("NumberValue") then
+        local conn2
+        conn2 = mv.Changed:Connect(function()
+            if not bgFrame.Parent then
+                if conn2 then conn2:Disconnect() end
+                return
+            end
+            update()
         end)
-        UpdateBar(postureFill, posture.Value, posture.MaxValue)
     end
 end
 
+-- Lifeforce (may appear later)
+task.spawn(function()
+    local lifeforce = character:FindFirstChild("Lifeforce", true)
+    if not lifeforce then
+        lifeforce = WaitForDescendantByName(character, "Lifeforce", 12)
+    end
+    if lifeforce then
+        BindValueBar(lifeforce, lifeBg, lifeFill)
+    end
+end)
+
+-- Posture (may appear later)
+task.spawn(function()
+    local posture = character:FindFirstChild("Posture", true)
+    if not posture then
+        posture = WaitForDescendantByName(character, "Posture", 12)
+    end
+    if posture then
+        BindValueBar(posture, postureBg, postureFill)
+    end
+end)
+
+-- clean up if character dies / billboard removed
+humanoid.Died:Connect(function()
+    if billboard and billboard.Parent then
+        billboard:Destroy()
+    end
+end)
+end
 
 -- ======================================================================
 -- [RANGE VISUALIZER] (Directional + only shows when enemy is facing you)
