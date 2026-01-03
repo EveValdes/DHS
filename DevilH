@@ -1259,7 +1259,7 @@ MainTab:Section('Toggles', '8932620770')
 --// TELEPORTS TAB (FULL UPDATED PART – NO DUPLICATES)
 
 local TeleportsTab = Window:InitTab({ Title = "Teleports" })
-TeleportsTab:Section("World.Dialog", "8932620770")
+TeleportsTab:Section("Teleports", "8932620770")
 
 local TweenService = game:GetService("TweenService")
 local DialogFolder = Workspace:WaitForChild("World"):WaitForChild("Dialog")
