@@ -499,14 +499,70 @@ end
 end
 
 
-local function ConnectEntity(char)
-    local humanoid = char:WaitForChild("Humanoid", 10)
-    if not humanoid then return end
-    local animator = humanoid:WaitForChild("Animator", 10)
-    if not animator then return end
+-- Connect to AnimationPlayed for ANY entity model in Entities
+-- Supports "wrapper models" where the real rig is model.Player
+local function ResolveAnimRig(entityModel)
+    if not entityModel or not entityModel:IsA("Model") then return nil end
 
-    animator.AnimationPlayed:Connect(function(track)
-        OnAnimationPlayed(char, track)
+    local rig = entityModel
+    local playerRig = entityModel:FindFirstChild("Player")
+    if playerRig and playerRig:IsA("Model") then
+        rig = playerRig
+    end
+
+    return rig
+end
+
+local function ConnectEntity(entityModel)
+    if not entityModel or not entityModel:IsA("Model") then return end
+
+    local rig = ResolveAnimRig(entityModel)
+    if not rig then return end
+
+    -- prevent duplicate connections (per wrapper model)
+    if entityModel:GetAttribute("AnimHooked") then return end
+    entityModel:SetAttribute("AnimHooked", true)
+
+    local function tryBind()
+        if not entityModel.Parent then return end
+        if not rig.Parent then
+            rig = ResolveAnimRig(entityModel)
+            if not rig then return end
+        end
+
+        local humanoid = rig:FindFirstChildOfClass("Humanoid") or rig:FindFirstChild("Humanoid")
+        if not humanoid then return end
+
+        local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid:FindFirstChild("Animator")
+        if not animator then return end
+
+        -- bind once per rig/animator
+        if animator:GetAttribute("AnimHooked") then return end
+        animator:SetAttribute("AnimHooked", true)
+
+        animator.AnimationPlayed:Connect(function(track)
+            -- IMPORTANT: pass the rig (the animated character), not the wrapper
+            OnAnimationPlayed(rig, track)
+        end)
+    end
+
+    -- attempt now
+    tryBind()
+
+    -- if humanoid/animator replicate late, bind when they appear
+    rig.ChildAdded:Connect(function()
+        tryBind()
+    end)
+
+    -- if wrapper swaps/creates Player rig later, bind then too
+    entityModel.ChildAdded:Connect(function(ch)
+        if ch.Name == "Player" and ch:IsA("Model") then
+            rig = ch
+            tryBind()
+            rig.ChildAdded:Connect(function()
+                tryBind()
+            end)
+        end
     end)
 end
 
@@ -869,19 +925,33 @@ ApplyESPState(Config.ESPEnabled)
 -- ==============================================================================
 task.spawn(getgenv().LoadValidAnimations)
 
--- Loop through existing entities
+-- Connect to ALL current + future animated rigs inside Entities (players, NPCs, nested models)
 if Config.TargetFolder then
-    for _, child in pairs(Config.TargetFolder:GetChildren()) do
-        ConnectEntity(child)
+    -- 1) connect current models (including nested)
+    for _, d in ipairs(Config.TargetFolder:GetDescendants()) do
+        if d:IsA("Model") then
+            -- Only attempt if it looks like an entity/rig or wrapper
+            if d:FindFirstChildOfClass("Humanoid") or d:FindFirstChild("Humanoid") or d:FindFirstChild("Player") then
+                ConnectEntity(d)
+            end
+        end
     end
-    Config.TargetFolder.ChildAdded:Connect(function(child)
-        task.wait(0.5) 
-        ConnectEntity(child)
+
+    -- 2) connect future models (even if they aren’t direct children)
+    Config.TargetFolder.DescendantAdded:Connect(function(d)
+        if d:IsA("Model") then
+            if d:FindFirstChildOfClass("Humanoid") or d:FindFirstChild("Humanoid") or d:FindFirstChild("Player") then
+                -- small delay helps replication for NPC rigs
+                task.wait(0.1)
+                ConnectEntity(d)
+            end
+        end
     end)
 end
 
 LocalPlayer.CharacterAdded:Connect(function(char)
 end)
+
 
 
 -- ==============================================================================
