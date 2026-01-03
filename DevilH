@@ -1062,7 +1062,7 @@ end)
 -- [UI SETUP]
 -- ==============================================================================
 local Window = syde:Init({
-    Title = 'New Game Parry',
+    Title = 'The Zone',
     SubText = 'Auto-Save Active'
 })
 
