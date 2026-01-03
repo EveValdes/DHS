@@ -1,1 +1,4180 @@
 
+
+-- ==============================================================================
+-- [0] SAFE LOAD CHECK (MENU-SAFE)
+-- ==============================================================================
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+    LocalPlayer = Players.LocalPlayer
+end
+
+-- Do NOT hard-wait for Character/HRP here (menu place may not have one yet).
+local function GetCharacterParts()
+    local char = LocalPlayer.Character
+    if not char then return nil, nil, nil end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    return char, hum, hrp
+end
+
+
+-- ==============================================================================
+-- [1] LOAD LIBRARY (SYDE)
+-- ==============================================================================
+local success, syde = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/essencejs/syde/refs/heads/main/source", true))()
+end)
+
+if not success or not syde then
+    syde = loadstring(game:HttpGet("https://raw.githubusercontent.com/1201for/Syde/main/source.lua"))()
+end
+
+if not syde then return warn("Fail") end
+
+-- ==============================================================================
+-- [2] SERVICES & CONFIG
+-- ==============================================================================
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+
+local BlockRemote = ReplicatedStorage:WaitForChild("EVENTS"):WaitForChild("Block")
+
+-- [[ CONFIGURATION ]] --
+local Config = {
+    AutoAdjustEnabled = false,
+    AnimOverrides = {},
+    IgnoreSameRace = false,
+
+    -- Click coords for Slayer farm "V + click routine"
+ClickXY = { X = 814, Y = 631 },
+
+-- Click coords for Demon farm "V + click routine"
+ClickXY2 = { X = 771, Y = 650 },
+
+    
+    AutoParryKey = "L", -- default key as STRING
+
+    ParryEnabled = true,
+    ESPEnabled = true,
+    FacingDot = 0.2,      -- 0.5 = 45 degrees
+    AwarenessRange = 45,  -- Max distance to check for enemies
+    TargetFolder = Workspace:FindFirstChild("Live"),
+
+CombatAnimIdToName = {},
+
+-- Ignore any Combat animation whose name contains one of these substrings (case-insensitive)
+CombatIgnoreWords = {
+    -- examples (edit to your needs):
+    "Block",
+    "unsheathe",
+    "sheath",
+    "Idle",
+    "Parry",
+    "walk",
+    "Run",
+    "Front",
+    "Back",
+    "Left",
+    "Right",
+    "ShakeBlock",
+    "SheatheBack",
+    "SheatheHip",
+    "unSheatheBack",
+    "unSheatheHip",
+},
+
+-- (optional) Ignore exact Combat animation names too
+CombatIgnoreExact = {
+    -- ["CombatIdle"] = true,
+},
+
+	AutoFarmSlot = 1,
+
+	AutoFarmSlots = {
+    [1] = { X = 900, Y = 630 }, -- Slot 1 (current default)
+    [2] = { X = 900, Y = 670 }, -- Slot 2 (EDIT THESE)
+    [3] = { X = 900, Y = 700 }, -- Slot 3 (EDIT THESE)
+},
+
+    SpeedHubEnabled = false,
+	DemonAutoFarmEnabled = false,
+
+    
+    -- Global Defaults
+    GlobalRange = 20,     -- Default range if not specified
+    NPC = { Range = 18, ReactionPct = 25, Color = Color3.fromRGB(255, 255, 0) },
+
+    
+    -- [[ BREATH SPECIFIC CONFIGS (Baselines) ]]
+    Breaths = {
+        ["Water"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(137, 231, 255) },
+        ["Thunder"]   = { SkillPct = 10, CombatPct = 18, Range = 18, Color = Color3.fromRGB(255, 240, 103) },
+        ["Flame"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(255, 175, 70) },
+        ["Wind"]      = { SkillPct = 12, CombatPct = 18, Range = 18, Color = Color3.fromRGB(122, 255, 69) },
+        ["Mist"]      = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(173, 227, 231) },
+        ["Insect"]    = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(151, 147, 255) },
+        ["Beast"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(110, 177, 160) },
+        ["Sound"]     = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(165, 222, 255) },
+        ["Snake"]     = { SkillPct = 12, CombatPct = 18, Range = 18, Color = Color3.fromRGB(62, 121, 39) },
+        ["Flower"]    = { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(233, 125, 179) },
+        ["Love"]      = { SkillPct = 15, CombatPct = 20, Range = 22, Color = Color3.fromRGB(251, 135, 255) },
+        ["Stone"]     = { SkillPct = 18, CombatPct = 22, Range = 22, Color = Color3.fromRGB(124, 124, 124) },
+        ["Breathless"]= { SkillPct = 15, CombatPct = 20, Range = 18, Color = Color3.fromRGB(124, 0, 0) },
+    },
+
+    Demons = {
+    ["Hantengu"] = { ReactionPct = 20, Range = 16 },
+    ["Akaza"] = { ReactionPct = 20, Range = 16 },
+    ["WindFan"] = { ReactionPct = 20, Range = 16 },
+    ["Wind Fan"] = { ReactionPct = 20, Range = 16 },
+    ["Lightning"] = { ReactionPct = 20, Range = 16 },
+    ["Sonic"] = { ReactionPct = 20, Range = 16 },
+    ["Douma"] = { ReactionPct = 20, Range = 16 },
+    ["Spike"] = { ReactionPct = 20, Range = 16 },
+    ["Speed Augmentation"] = { ReactionPct = 20, Range = 16 },
+    ["BloodScythe"] = { ReactionPct = 20, Range = 16 },
+    ["Blood Scythe"] = { ReactionPct = 20, Range = 16 },
+    ["Obi"] = { ReactionPct = 20, Range = 16 },
+    ["String"] = { ReactionPct = 20, Range = 16 },
+    ["Enmu"] = { ReactionPct = 20, Range = 16 },
+    ["Zohakuten"] = { ReactionPct = 20, Range = 16 },
+    ["Staff"] = { ReactionPct = 20, Range = 16 },
+    ["Biwa"] = { ReactionPct = 20, Range = 16 },
+    ["Hairo"] = { ReactionPct = 20, Range = 16 },
+    ["Gyokko"] = { ReactionPct = 20, Range = 16 },
+    ["Hiasobi Temari"] = { ReactionPct = 20, Range = 16 },
+    ["Arrow"] = { ReactionPct = 20, Range = 16 },
+    ["Demon Flames"] = { ReactionPct = 20, Range = 16 },
+    ["Muzan BDA"] = { ReactionPct = 20, Range = 16 },
+    ["Suppressed Muzan"] = { ReactionPct = 20, Range = 16 },
+},
+
+
+    -- [[ SKILL SPECIFIC CONFIGS ]]
+    -- Overrides breath defaults if the animation matches
+    Skills = {
+        ["360 Slash"] = 15,
+        ["Dashing Draw"] = 15,
+        ["Dashing Strike"] = 15,
+        ["Leap Cut"] = 15,
+        ["Surface Slash"] = 15,
+        ["Thrust"] = 15,
+        ["Charged Strike"] = 18,
+        ["Dashing Vertical Strike"] = 15,
+        ["Fancy Draw"] = 15,
+        ["Reverse Deflecting Slash"] = 12,
+        ["Bisection"] = 15,
+        ["Deflecting Slash"] = 12,
+        ["Cleave"] = 15,
+        ["Shifting Thrust"] = 15,
+        ["Razor Slash"] = 15,
+        ["Left Blade Sweep"] = 15,
+        ["Right Blade Sweep"] = 15,
+        ["Blade Screen"] = 18,
+        ["Horizontal Cut"] = 15,
+        ["Low Sweep"] = 15,
+        ["Rising Vertical Slash"] = 15,
+        ["Whirling Rising Slash"] = 15,
+        ["Vertical Slash"] = 15,
+        ["Wheelcut"] = 18,
+        ["Left Ascending Slash"] = 15,
+        ["Right Ascending Slash"] = 15,
+        ["Skyscraper"] = 18,
+    },
+
+        ValidAnimationIds = {},
+		NPCAnimIdToName = {},
+
+
+    -- Resolved Skill Name <-> AnimationId maps
+    SkillAnimIdToName = {},  -- [animId] = "Skill Name"
+    SkillNameToAnimId = {},  -- ["Skill Name"] = animId
+}
+
+
+local LastParryTime = 0
+local LastSkillParried = "None"
+
+local LastParryAnimId = nil
+local LastParryUsedPct = nil
+local LastParryAnimName = nil
+local LastParryVariantKey = nil -- NEW: breath-variant key used for this parry attempt (or nil)
+
+-- NEW: after a detected feint, don't count "misses" for 1 second
+local FeintGraceUntil = 0
+
+          
+
+
+-- ==============================================================================
+-- [3] SAVE MANAGER
+-- ==============================================================================
+local SaveManager = {}
+local FileName = "ZoneConfig.json"
+
+function SaveManager:Save()
+    if not writefile then return end
+
+    local dataToSave = {
+        AutoAdjustEnabled = (Config.AutoAdjustEnabled == true),
+AnimOverrides = Config.AnimOverrides or {},
+        AwarenessRange = Config.AwarenessRange,
+        AutoParryKey = Config.AutoParryKey,
+        SpeedHubEnabled = Config.SpeedHubEnabled,
+		NPCReactionTiming = Config.NPC and Config.NPC.ReactionPct or 19,
+        ParryEnabled = Config.ParryEnabled,
+        IgnoreSameRace = (Config.IgnoreSameRace == true),
+        ClickXY = Config.ClickXY,
+        ClickXY2 = Config.ClickXY2,
+        ESPEnabled = (Config.ESPEnabled == true),
+
+
+		
+		DemonAutoFarmEnabled = (getgenv().DemonAutoFarmEnabled == true),
+
+
+
+		AutoFarmSlot = Config.AutoFarmSlot,
+AutoFarmSlots = Config.AutoFarmSlots,
+
+
+        Breaths = {},
+        Demons = {},   -- ✅ now saved as {ReactionPct, Range}
+        Skills = Config.Skills,
+    }
+
+    -- Breaths (unchanged)
+    for name, data in pairs(Config.Breaths) do
+        dataToSave.Breaths[name] = {
+            SkillPct = data.SkillPct,
+            CombatPct = data.CombatPct,
+            Range = data.Range
+        }
+    end
+
+    -- ✅ Demons (NEW: save ReactionPct + Range, with backwards compat)
+    if Config and type(Config.Demons) == "table" then
+        for name, data in pairs(Config.Demons) do
+            if type(data) == "table" then
+                dataToSave.Demons[name] = {
+                    ReactionPct = data.ReactionPct,
+                    Range = data.Range
+                }
+            elseif type(data) == "number" then
+                -- old format support (in case you still have numbers somewhere)
+                dataToSave.Demons[name] = {
+                    ReactionPct = data,
+                    Range = 16
+                }
+            end
+        end
+    end
+
+    writefile(FileName, HttpService:JSONEncode(dataToSave))
+end
+
+
+-- Ensure defaults exist (so slot logic never indexes nil)
+Config.AutoFarmSlot = tonumber(Config.AutoFarmSlot) or 1
+Config.AutoFarmSlots = Config.AutoFarmSlots or {
+    [1] = { X = 900, Y = 700 },
+    [2] = { X = 900, Y = 700 },
+    [3] = { X = 900, Y = 700 },
+}
+
+local function ApplyAutoFarmSlot(slotNum)
+    slotNum = tonumber(slotNum) or 1
+    if not Config.AutoFarmSlots[slotNum] then slotNum = 1 end
+
+    Config.AutoFarmSlot = slotNum
+
+    local s = Config.AutoFarmSlots[slotNum]
+    getgenv().AutoFarmEmptyLiveX = tonumber(s.X) or 900
+    getgenv().AutoFarmEmptyLiveY = tonumber(s.Y) or 700
+
+    if SaveManager and SaveManager.Save then
+        SaveManager:Save()
+    end
+end
+
+
+
+function SaveManager:Load()
+    if isfile and isfile(FileName) then
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(readfile(FileName))
+        end)
+
+        if success and result then
+            -- Global
+            if result.AwarenessRange then
+                Config.AwarenessRange = result.AwarenessRange
+            end
+
+            if result.AutoParryKey then
+    Config.AutoParryKey = tostring(result.AutoParryKey)
+end
+
+
+            -- Breaths
+            if result.Breaths then
+                for name, savedData in pairs(result.Breaths) do
+                    if Config.Breaths[name] and type(savedData) == "table" then
+                        Config.Breaths[name].SkillPct = savedData.SkillPct or Config.Breaths[name].SkillPct
+                        Config.Breaths[name].CombatPct = savedData.CombatPct or Config.Breaths[name].CombatPct
+                        Config.Breaths[name].Range = savedData.Range or Config.Breaths[name].Range
+                    end
+                end
+            end
+
+            if result.IgnoreSameRace ~= nil then
+    Config.IgnoreSameRace = (result.IgnoreSameRace == true)
+end
+
+
+if result.ClickXY and type(result.ClickXY) == "table" then
+    Config.ClickXY = result.ClickXY
+end
+if result.ClickXY2 and type(result.ClickXY2) == "table" then
+    Config.ClickXY2 = result.ClickXY2
+end
+
+
+			-- NPC reaction timing
+if result.NPCReactionTiming ~= nil then
+    Config.NPC = Config.NPC or {}
+    Config.NPC.ReactionPct = tonumber(result.NPCReactionTiming) or (Config.NPC.ReactionPct or 19)
+end
+
+if result.AutoAdjustEnabled ~= nil then
+    Config.AutoAdjustEnabled = (result.AutoAdjustEnabled == true)
+end
+
+if result.AnimOverrides and type(result.AnimOverrides) == "table" then
+    Config.AnimOverrides = result.AnimOverrides
+else
+    Config.AnimOverrides = Config.AnimOverrides or {}
+end
+
+
+-- Auto Parry toggle
+if result.ParryEnabled ~= nil then
+    Config.ParryEnabled = (result.ParryEnabled == true)
+end
+
+
+if result.ESPEnabled ~= nil then
+    Config.ESPEnabled = (result.ESPEnabled == true)
+end
+
+
+            -- SpeedHub toggle
+            if result.SpeedHubEnabled ~= nil then
+                Config.SpeedHubEnabled = result.SpeedHubEnabled
+            end
+
+			-- Demon Autofarm toggle
+if result.DemonAutoFarmEnabled ~= nil then
+    Config.DemonAutoFarmEnabled = (result.DemonAutoFarmEnabled == true)
+    getgenv().DemonAutoFarmEnabled = Config.DemonAutoFarmEnabled
+end
+
+
+            -- ✅ AutoFarm Slot selection + coordinates
+            if result.AutoFarmSlot ~= nil then
+                Config.AutoFarmSlot = tonumber(result.AutoFarmSlot) or Config.AutoFarmSlot or 1
+            end
+            if result.AutoFarmSlots and type(result.AutoFarmSlots) == "table" then
+                Config.AutoFarmSlots = result.AutoFarmSlots
+            end
+
+            -- ✅ Demons (supports NEW table format + OLD number format)
+            if result.Demons and type(result.Demons) == "table" then
+                for name, saved in pairs(result.Demons) do
+                    local demon = Config.Demons and Config.Demons[name]
+                    if demon then
+                        if type(demon) == "table" then
+                            if type(saved) == "table" then
+                                demon.ReactionPct = saved.ReactionPct or demon.ReactionPct
+                                demon.Range = saved.Range or demon.Range
+                            elseif type(saved) == "number" then
+                                demon.ReactionPct = saved
+                            end
+                        elseif type(demon) == "number" then
+                            -- If YOUR Config.Demons wasn't updated yet, still allow loading old numeric values
+                            if type(saved) == "table" then
+                                Config.Demons[name] = saved.ReactionPct or demon
+                            elseif type(saved) == "number" then
+                                Config.Demons[name] = saved
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Skills
+            if result.Skills then
+                for name, pct in pairs(result.Skills) do
+                    if Config.Skills[name] then
+                        Config.Skills[name] = pct
+                    end
+                end
+            end
+
+        end
+    end
+end
+
+
+getgenv().SpeedHubEnabled = getgenv().SpeedHubEnabled or false
+getgenv().SpeedHubLoaded = getgenv().SpeedHubLoaded or false
+-- ===============================
+-- DEMON AUTOFARM GLOBAL FLAG
+-- ===============================
+getgenv().DemonAutoFarmEnabled = getgenv().DemonAutoFarmEnabled or false
+
+local AutoParryBeforeSpeedHub = nil
+
+
+local function LoadSpeedHub()
+    if getgenv().SpeedHubLoaded then return end
+    getgenv().SpeedHubLoaded = true
+
+    task.spawn(function()
+-- Print a message to the console for troubleshooting
+
+-- Load and execute the script
+local success, err = pcall(function()
+	local Players = game:GetService("Players")
+	local TweenService = game:GetService("TweenService")
+	local RunService = game:GetService("RunService")
+	local UserInputService = game:GetService("UserInputService")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local VirtualInputManager = game:GetService("VirtualInputManager")
+
+	local player = Players.LocalPlayer
+
+	-- ===== SETTINGS =====
+	local LIVE_FOLDER = workspace:WaitForChild("Live")
+	local NPC_PREFIX = "NPC_"
+
+	-- Combat (hover/lock)
+	local COMBAT_HEIGHT = 10
+	local COMBAT_BACK_OFFSET = 0
+	local COMBAT_TWEEN_TIME = 0.07
+
+	-- E equip control
+	local ePressedEver = false
+	local lastEPress = 0
+
+	-- LeftAlt spam control
+	local lastLeftAltPress = 0
+
+	-- BlueFlower: press A once after FIRST teleport ever
+	local pressedAAfterFirstBlueFlowerTeleport = false
+
+	-- Spam rates (ONLY during combat lock)
+	local CLICK_SPEED = 0.1
+	local W_SPAM_SPEED = 0.08
+
+	-- Fixed click positions
+	local function getSlayerClickXY()
+    local x = tonumber(getgenv().SlayerClickX) or 814
+    local y = tonumber(getgenv().SlayerClickY) or 631
+    return x, y
+end
+
+	local VE_TOP_X, VE_TOP_Y = 1889, 50
+-- Pulled from global slot selection (defaults if unset)
+local function getEmptyLiveXY()
+    local x = tonumber(getgenv().AutoFarmEmptyLiveX) or 900
+    local y = tonumber(getgenv().AutoFarmEmptyLiveY) or 700
+    return x, y
+end
+
+
+
+	-- Intervals
+	local VILLAGER_ESCORT_INTERVAL = 2
+
+	-- V + click routine timings
+	local WAIT_BEFORE_V = 5
+	local WAIT_AFTER_CLICK = 20 -- hard loop every 10 seconds
+
+	-- ===== STATE =====
+-- GLOBAL FLAG CONTROLLED BY SCRIPT 2
+-- GLOBAL FLAG CONTROLLED BY SCRIPT 2 (DO NOT RESET HERE)
+local function isEnabled()
+    return getgenv().SpeedHubEnabled == true
+end
+
+
+
+	local lockConn: RBXScriptConnection? = nil
+	local inCombatLock = false
+
+	-- Auto-pause when no non-human NPCs exist (combat finished)
+local autoPaused = false
+local autoPauseReason = ""
+
+local function isRunning(): boolean
+	return isEnabled() and (not autoPaused)
+end
+
+local function setAutoPaused(state: boolean, reason: string?)
+	if autoPaused == state then return end
+	autoPaused = state
+	autoPauseReason = state and (reason or "AutoPaused") or ""
+	if autoPaused then
+	else
+	end
+end
+
+
+	local currentCombatNPC: Model? = nil
+
+	-- ===== CHARACTER =====
+	local LOADING_PLACE_ID = 11641576792
+
+	local function getCharacter()
+		-- loading/menu place → no character exists
+		if game.PlaceId == LOADING_PLACE_ID then
+			return nil, nil, nil
+		end
+
+		local character = player.Character or player.CharacterAdded:Wait()
+		local humanoid = character:WaitForChild("Humanoid")
+		local hrp = character:WaitForChild("HumanoidRootPart")
+
+		return character, humanoid, hrp
+	end
+
+	local character, humanoid, hrp
+
+	if game.PlaceId ~= LOADING_PLACE_ID then
+		character, humanoid, hrp = getCharacter()
+	end
+
+	player.CharacterAdded:Connect(function(char)
+		task.defer(function()
+			local h = char:WaitForChild("Humanoid")
+			local r = char:WaitForChild("HumanoidRootPart")
+			character, humanoid, hrp = char, h, r
+		end)
+	end)
+
+	local function getModelPart(model: Model): BasePart?
+		if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+			return model.PrimaryPart
+		end
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") then
+				return d
+			end
+		end
+		return nil
+	end
+
+	-- ===== Movement control =====
+	local function stopLock()
+		if lockConn then
+			lockConn:Disconnect()
+			lockConn = nil
+		end
+		if inCombatLock then
+			inCombatLock = false
+		end
+	end
+
+	local function setMovementLocked(isLocked: boolean)
+		if not humanoid then return end
+		if isLocked then
+			humanoid.PlatformStand = true
+			humanoid.AutoRotate = false
+		else
+			humanoid.PlatformStand = false
+			humanoid.AutoRotate = true
+		end
+	end
+
+	-- ===== Virtual input helpers =====
+	local function VirtualPressKey(keyCode: Enum.KeyCode, pressTime: number?)
+		pressTime = pressTime or 0.04
+		VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+		task.wait(pressTime)
+		VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+	end
+
+	local function VirtualClickAt(x: number, y: number)
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+		task.wait()
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+	end
+
+	local function VirtualClickAtMouse()
+		local mouseLocation = UserInputService:GetMouseLocation()
+		VirtualInputManager:SendMouseButtonEvent(mouseLocation.X, mouseLocation.Y, 0, true, game, 0)
+		task.wait()
+		VirtualInputManager:SendMouseButtonEvent(mouseLocation.X, mouseLocation.Y, 0, false, game, 0)
+	end
+
+	-- ===== Missions =====
+	local function HasMissionsFolder(): boolean
+		return ReplicatedStorage:FindFirstChild("missions") ~= nil
+	end
+
+	local function getMissionNameStringValue(): StringValue?
+		local missions = ReplicatedStorage:FindFirstChild("missions")
+		if not missions then
+			return nil
+		end
+		for _, d in ipairs(missions:GetDescendants()) do
+			if d:IsA("StringValue") and d.Name == "name" then
+				return d
+			end
+		end
+		return nil
+	end
+
+	local function getMissionName(): string
+		local sv = getMissionNameStringValue()
+		return sv and sv.Value or ""
+	end
+
+	-- ===== NPC helpers =====
+	local function getNPCPrimaryPart(model: Model): BasePart?
+		if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+			return model.PrimaryPart
+		end
+		local hrp2 = model:FindFirstChild("HumanoidRootPart")
+		if hrp2 and hrp2:IsA("BasePart") then
+			return hrp2
+		end
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") then
+				return d
+			end
+		end
+		return nil
+	end
+
+	local function isNPCModel(inst: Instance): boolean
+		return inst
+			and inst:IsA("Model")
+			and inst.Name:sub(1, #NPC_PREFIX) == NPC_PREFIX
+			and inst:IsDescendantOf(LIVE_FOLDER)
+	end
+
+	local function findAnyNonHumanNPC(): Model?
+		for _, m in ipairs(LIVE_FOLDER:GetDescendants()) do
+			if isNPCModel(m) then
+				if m:GetAttribute("Race") ~= "Human" then
+					if getNPCPrimaryPart(m) then
+						return m
+					end
+				end
+			end
+		end
+		return nil
+	end
+
+	-- ===== CFrame positioning (combat hover) =====
+	local function computeHoverCFrame(npcPart: BasePart, height: number, backOffset: number): CFrame
+		local base = npcPart.CFrame
+		local pos = base.Position + base.UpVector * height + base.LookVector * backOffset
+		return CFrame.lookAt(pos, npcPart.Position)
+	end
+
+	local function tweenHRPTo(targetCF: CFrame, tweenTime: number)
+		if not hrp or not hrp.Parent then return end
+		local t = TweenService:Create(
+			hrp,
+			TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ CFrame = targetCF }
+		)
+		t:Play()
+		t.Completed:Wait()
+	end
+
+	-- ===== WeaponData detection (LATCH) =====
+	local function weaponDataExists(): boolean
+		-- 1) The path you were using
+		local live = workspace:FindFirstChild("Live")
+		local lp = live and live:FindFirstChild("LocalPlayer")
+		if lp and lp:FindFirstChild("WeaponData") then
+			return true
+		end
+
+		-- 2) Anywhere under the actual Player instance
+		if player:FindFirstChild("WeaponData", true) then
+			return true
+		end
+
+		-- 3) Anywhere under character (just in case)
+		if player.Character and player.Character:FindFirstChild("WeaponData", true) then
+			return true
+		end
+
+		return false
+	end
+
+	-- If WeaponData ever gets added later, latch immediately forever
+	do
+		local function latchIfWeaponData(inst: Instance)
+			if inst and inst.Name == "WeaponData" then
+				ePressedEver = true
+			end
+		end
+
+		-- Existing?
+		if weaponDataExists() then
+			ePressedEver = true
+		end
+
+		-- Future adds
+		player.DescendantAdded:Connect(latchIfWeaponData)
+		if workspace then
+			workspace.DescendantAdded:Connect(latchIfWeaponData)
+		end
+	end
+
+	
+	-- ===== LeftAlt spam loop (every 0.6 seconds) =====
+	task.spawn(function()
+		while true do
+			task.wait(0.05)
+
+			if not isEnabled() then
+				continue
+			end
+
+			local now = os.clock()
+			if (now - lastLeftAltPress) >= 0.6 then
+				lastLeftAltPress = now
+				VirtualPressKey(Enum.KeyCode.LeftAlt, 0.05)
+			end
+		end
+	end)
+
+	-- ===== PlaceId/GameId-based spam click (more reliable) =====
+	local TARGET_ID = 11641576792
+
+	task.spawn(function()
+		-- wait for game to finish loading so IDs/UI are stable
+		if not game:IsLoaded() then
+			game.Loaded:Wait()
+		end
+		task.wait(1)
+
+
+		while true do
+			if not isEnabled() then
+				task.wait(0.2)
+				continue
+			end
+
+			local placeMatch = (game.PlaceId == TARGET_ID)
+			local gameMatch = (game.GameId == TARGET_ID)
+
+			
+
+			-- run if either PlaceId OR GameId matches the target
+			if placeMatch or gameMatch then
+				local ex, ey = getEmptyLiveXY()
+VirtualClickAt(ex, ey)
+				task.wait(0.15)
+			else
+				task.wait(0.5)
+			end
+		end
+	end)
+
+	-- ===== Villager Escort / Stalked Logic (Return to Menu Spam) =====
+	task.spawn(function()
+		-- Pre-load the RemoteFunction
+		local ReturnRemote = nil
+		local events = ReplicatedStorage:WaitForChild("EVENTS", 5)
+		if events then
+			ReturnRemote = events:WaitForChild("ReturnToMainMenu", 5)
+		end
+
+		while true do
+			-- Loop every 1 second as requested
+			task.wait(1)
+
+			if not isEnabled() then continue end
+			if not HasMissionsFolder() then continue end
+
+			local missionName = getMissionName()
+			
+			-- Runs for either "Villager Escort" OR "Stalked"
+			if missionName == "Villager Escort" or missionName == "Stalked" then
+				
+				-- Ensure we aren't stuck in combat mode from a previous mission
+				if inCombatLock then
+					stopLock()
+					setMovementLocked(false)
+				end
+
+				-- [[ NEW: SPAM RETURN TO MENU ]] --
+				if ReturnRemote then
+					-- Using pcall to prevent crashes if the server rejects the invoke
+					pcall(function()
+						ReturnRemote:InvokeServer()
+					end)
+				end
+			end
+		end
+	end)
+
+	-- ===== Number key spam (1–6) ONLY during combat =====
+task.spawn(function()
+    local KEY_SPAM_DELAY = 0.12 -- adjust speed here
+    local numberKeys = {
+        Enum.KeyCode.Seven,
+        Enum.KeyCode.Eight,
+
+    }
+
+    while true do
+        task.wait(KEY_SPAM_DELAY)
+
+        -- MUST be isEnabled() AND in combat
+        if not isEnabled() or not inCombatLock then
+            continue
+        end
+
+        for _, key in ipairs(numberKeys) do
+            -- stop immediately if combat ends mid-loop
+            if not inCombatLock or not isEnabled() then
+                break
+            end
+
+            VirtualPressKey(key, 0.03)
+            task.wait(0.02)
+        end
+    end
+end)
+
+
+	-- ===== Medicine Retrival: BlueFlower only (teleport once per flower, stay until gone) =====
+	-- ===== Medicine Retrival: BlueFlower only (teleport once per flower, stay until gone) =====
+	task.spawn(function()
+		local CLICK_INTERVAL = 0.08
+		local PER_FLOWER_TIMEOUT = 20 -- seconds safety so it can't hang forever
+		local SPAM_X, SPAM_Y = 961, 767
+
+		while true do
+			task.wait(0.2)
+
+			if not isEnabled() then
+				continue
+			end
+
+			if not HasMissionsFolder() then
+				continue
+			end
+
+			if getMissionName() ~= "Medicine Retrival" then
+				continue
+			end
+
+			-- need character/hrp
+			if not hrp or not hrp.Parent then
+				if game.PlaceId ~= LOADING_PLACE_ID then
+					character, humanoid, hrp = getCharacter()
+				end
+				if not hrp then
+					continue
+				end
+			end
+
+			local thrown = workspace:FindFirstChild("Thrown")
+			if not thrown then
+				continue
+			end
+
+			-- don’t fight with combat hover while doing this
+			if inCombatLock then
+				stopLock()
+				setMovementLocked(false)
+			end
+
+			-- Find ONE BlueFlower, do it fully, then look for the next
+			local target: Model? = nil
+			for _, m in ipairs(thrown:GetChildren()) do
+				if m:IsA("Model") and m.Name == "BlueFlower" then
+					target = m
+					break
+				end
+			end
+
+			if not target then
+				continue
+			end
+
+			local part = getModelPart(target)
+			if not part then
+				continue
+			end
+
+			-- TELEPORT ONCE to this BlueFlower
+			do
+				local standPos = part.Position + Vector3.new(0, 2, 0) + (part.CFrame.LookVector * -2)
+				local faceCF = CFrame.lookAt(standPos, part.Position)
+				
+				-- [[ NEW: SPAM "A" BEFORE TELEPORTING ]] --
+				-- This runs right before the tween starts
+				for i = 1, 10 do
+					VirtualPressKey(Enum.KeyCode.A, 0.02)
+					task.wait(0.02)
+				end
+				
+				tweenHRPTo(faceCF, 0.12)
+			end
+
+			-- STAY here until this BlueFlower is gone, spamming fixed click position
+			local startT = os.clock()
+			while isEnabled()
+				and HasMissionsFolder()
+				and getMissionName() == "Medicine Retrival"
+				and hrp and hrp.Parent
+				and target.Parent == thrown
+				and part and part.Parent
+				and (os.clock() - startT) < PER_FLOWER_TIMEOUT
+			do
+				VirtualClickAt(SPAM_X, SPAM_Y)
+				task.wait(CLICK_INTERVAL)
+			end
+		end
+	end)
+
+
+	-- ===== Combat spam loop (ONLY while combat hover lock is isEnabled()) =====
+task.spawn(function()
+    local lastClick = 0
+    local lastW = 0
+
+    while true do
+        task.wait(0.01)
+
+        if not isEnabled() or not inCombatLock then
+            continue
+        end
+
+        local now = os.clock()
+
+        if (now - lastW) >= W_SPAM_SPEED then
+            lastW = now
+            VirtualPressKey(Enum.KeyCode.W, 0.03)
+        end
+
+        if (now - lastClick) >= CLICK_SPEED then
+            lastClick = now
+            VirtualClickAtMouse()
+        end
+    end
+end)
+
+
+	-- ===== V + fixed click routine (hard 10s cooldown) =====
+	-- ===== V + fixed click routine (hard 10s cooldown) + Anti-Stuck =====
+	task.spawn(function()
+		local lastFire = 0
+		local loopCount = 0 -- Counter for consecutive loops
+
+		while true do
+			task.wait(0.2)
+
+			if not isEnabled() then
+				loopCount = 0 -- Reset if disabled
+				continue
+			end
+
+			-- Enforce cooldown (changed from 15s to WAIT_AFTER_CLICK variable)
+			local now = os.clock()
+			if (now - lastFire) < WAIT_AFTER_CLICK then
+				continue
+			end
+
+			local missionName = ""
+			if HasMissionsFolder() then
+				missionName = getMissionName()
+			end
+
+			local isDesired = (missionName == "Villager Escort" or missionName == "Extermination")
+
+			-- This logic runs if we DO NOT have missions or if we are NOT on a desired mission
+			-- (Essentially the "idle" or "stuck" state handling)
+			if (not HasMissionsFolder()) or (not isDesired) then
+				if not inCombatLock then
+					lastFire = now
+					
+					-- Increment loop counter
+					loopCount = loopCount + 1
+					
+					-- [[ NEW: TELEPORT IF STUCK (5 Loops) ]] --
+					if loopCount >= 5 then
+						local walls = workspace:FindFirstChild("InvisibleWalls")
+						if walls then
+							-- Teleport to the first child found in the folder
+							local wall = walls:GetChildren()[1]
+							if wall and wall:IsA("BasePart") and hrp then
+								-- Teleport 5 studs above the wall to be safe
+								hrp.CFrame = wall.CFrame + Vector3.new(0, wall.Size.Y/2 + 5, 0)
+							end
+						end
+						loopCount = 0 -- Reset counter after teleport
+					end
+
+					VirtualPressKey(Enum.KeyCode.V, 0.05)
+					task.wait(0.2)
+					
+local cx, cy = getSlayerClickXY()
+VirtualClickAt(cx, cy)
+
+				end
+			else
+				-- If we ARE on a desired mission, reset the stuck counter
+				loopCount = 0
+			end
+		end
+	end)
+
+    local function fireCombatActivated()
+    local player = game:GetService("Players").LocalPlayer
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then return end
+
+    local combatTool = backpack:FindFirstChild("Combat")
+        or (player.Character and player.Character:FindFirstChild("Combat"))
+
+    if not combatTool then return end
+
+    local remote = combatTool:FindFirstChild("ToggleActivated")
+    if remote and remote:IsA("RemoteEvent") then
+        remote:FireServer(true)
+    end
+end
+
+
+	local function fireCombatRemote()
+		local tool = player.Backpack:FindFirstChild("Combat") or (player.Character and player.Character:FindFirstChild("Combat"))
+		if tool then
+			local remote = tool:FindFirstChild("ToggleEquip")
+			if remote and remote:IsA("RemoteEvent") then
+				remote:FireServer(true)
+			end
+		end
+	end
+
+	-- ===== Main loop (Extermination combat hover lock) =====
+	task.spawn(function()
+		-- Track the NPC we are currently ignoring due to the 5s timeout
+		local temporaryIgnoredNPC = nil 
+		
+		-- Particle tracking variables
+		local lastParticleTime = 0
+		local particleConnection: RBXScriptConnection? = nil
+		
+		-- [[ NEW: Equip Spam Timer ]] --
+		local lastEquipTime = 0
+
+		local function cleanupParticleTracking()
+			if particleConnection then
+				particleConnection:Disconnect()
+				particleConnection = nil
+			end
+		end
+
+		while true do
+			task.wait(0.12)
+
+			if not isEnabled() then
+				cleanupParticleTracking()
+				temporaryIgnoredNPC = nil
+				continue
+			end
+
+			-- Refresh on respawn
+			if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+				character, humanoid, hrp = getCharacter()
+			end
+
+			-- Check for missions folder
+			if not HasMissionsFolder() then
+				stopLock()
+				setMovementLocked(false)
+				currentCombatNPC = nil
+				cleanupParticleTracking()
+				temporaryIgnoredNPC = nil
+				continue
+			end
+
+			local missionName = getMissionName()
+
+			-- [[ STOP ALL COMBAT IF MISSION IS "At Ease Soldier! Soldier!" OR EMPTY ]] --
+			if missionName == "At Ease Soldier! Soldier!" or missionName == "" then
+				stopLock()
+				setMovementLocked(false)
+				currentCombatNPC = nil
+				cleanupParticleTracking()
+				temporaryIgnoredNPC = nil
+				continue -- Skip the rest of the loop (stops combat functions)
+			end
+
+			-- Extermination only: hover lock combat
+			if missionName == "Extermination" then
+				
+				-- If locked, keep lock active and spam equip
+				if inCombatLock then
+					-- [[ NEW: SPAM EQUIP EVERY 1 SECOND ]] --
+					if (os.clock() - lastEquipTime) >= 1 then
+						fireCombatRemote()
+						lastEquipTime = os.clock()
+					end
+					continue
+				end
+
+				-- 1. SEARCH FOR TARGET
+				local potentialTarget = nil
+				
+				for _, m in ipairs(LIVE_FOLDER:GetDescendants()) do
+					if isNPCModel(m) and m:GetAttribute("Race") ~= "Human" and getNPCPrimaryPart(m) then
+						local h = m:FindFirstChild("Humanoid")
+						if h and h.Health > 0 then
+							if m == temporaryIgnoredNPC then continue end
+							potentialTarget = m
+							break 
+						end
+					end
+				end
+
+				-- Fallback to ignored target if nothing else exists
+				if not potentialTarget and temporaryIgnoredNPC then
+					if temporaryIgnoredNPC.Parent and getNPCPrimaryPart(temporaryIgnoredNPC) then
+						local h = temporaryIgnoredNPC:FindFirstChild("Humanoid")
+						if h and h.Health > 0 then
+							potentialTarget = temporaryIgnoredNPC
+							temporaryIgnoredNPC = nil
+						end
+					end
+				end
+
+				if not potentialTarget then
+					stopLock()
+					setMovementLocked(false)
+					currentCombatNPC = nil
+					cleanupParticleTracking()
+					continue
+				end
+
+				-- New Target Found
+				currentCombatNPC = potentialTarget
+				local npcPart = getNPCPrimaryPart(currentCombatNPC)
+				
+				if not npcPart then
+					currentCombatNPC = nil
+					continue
+				end
+
+				-- Engage Lock
+				setMovementLocked(true)
+				tweenHRPTo(computeHoverCFrame(npcPart, COMBAT_HEIGHT, COMBAT_BACK_OFFSET), COMBAT_TWEEN_TIME)
+				stopLock()
+				inCombatLock = true
+				
+				-- [[ NEW: EQUIP IMMEDIATELY & RESET TIMER ]] --
+				fireCombatRemote()
+				lastEquipTime = os.clock()
+				
+				-- Reset tracking
+				lastParticleTime = os.clock()
+				cleanupParticleTracking()
+				
+				particleConnection = workspace.DescendantAdded:Connect(function(descendant)
+					if descendant:IsA("ParticleEmitter") then
+						local sourcePos = nil
+						if descendant.Parent:IsA("BasePart") then
+							sourcePos = descendant.Parent.Position
+						elseif descendant.Parent:IsA("Attachment") then
+							sourcePos = descendant.Parent.WorldPosition
+						end
+
+						if sourcePos and currentCombatNPC then
+							local root = getNPCPrimaryPart(currentCombatNPC)
+							if root then
+								local dist = (sourcePos - root.Position).Magnitude
+								if dist <= 15 then
+									lastParticleTime = os.clock()
+								end
+							end
+						end
+					end
+				end)
+
+				-- Start Lock Loop
+				lockConn = RunService.RenderStepped:Connect(function()
+					if not isEnabled() then return end
+					
+					if not currentCombatNPC or not currentCombatNPC:IsDescendantOf(LIVE_FOLDER) then 
+						stopLock()
+						setMovementLocked(false)
+						currentCombatNPC = nil
+						cleanupParticleTracking()
+						return 
+					end
+					
+					local npcHum = currentCombatNPC:FindFirstChild("Humanoid")
+					if not npcHum or npcHum.Health <= 0 then
+						stopLock()
+						setMovementLocked(false)
+						currentCombatNPC = nil
+						cleanupParticleTracking()
+						return 
+					end
+
+					if currentCombatNPC:GetAttribute("Race") == "Human" then return end
+
+					if (os.clock() - lastParticleTime) > 5 then
+						temporaryIgnoredNPC = currentCombatNPC
+						stopLock()
+						setMovementLocked(false)
+						currentCombatNPC = nil
+						cleanupParticleTracking()
+						return
+					end
+
+					local partNow = getNPCPrimaryPart(currentCombatNPC)
+					if partNow and hrp then
+						hrp.CFrame = computeHoverCFrame(partNow, COMBAT_HEIGHT, COMBAT_BACK_OFFSET)
+						hrp.AssemblyLinearVelocity = Vector3.zero
+						hrp.AssemblyAngularVelocity = Vector3.zero
+					end
+				end)
+
+				continue
+			end
+
+			stopLock()
+			setMovementLocked(false)
+			currentCombatNPC = nil
+			cleanupParticleTracking()
+			temporaryIgnoredNPC = nil
+		end
+	end)
+end)
+
+
+
+-- Check if the script executed successfully or encountered an error
+if success then
+else
+end
+
+    end)
+end
+
+local function ApplySpeedHubState(enabled)
+    -- Sync global
+    getgenv().SpeedHubEnabled = enabled
+    Config.SpeedHubEnabled = enabled
+
+    -- Disable / restore AutoParry cleanly
+    if enabled then
+        if AutoParryBeforeSpeedHub == nil then
+            AutoParryBeforeSpeedHub = Config.ParryEnabled
+        end
+        Config.ParryEnabled = false
+    else
+        if AutoParryBeforeSpeedHub ~= nil then
+            Config.ParryEnabled = AutoParryBeforeSpeedHub
+            AutoParryBeforeSpeedHub = nil
+        end
+    end
+
+    SaveManager:Save()
+
+    -- Load SpeedHub logic once
+    if enabled then
+        LoadSpeedHub()
+    end
+end
+
+
+
+SaveManager:Load()
+-- Sync demon autofarm after loading config
+getgenv().DemonAutoFarmEnabled = (Config.DemonAutoFarmEnabled == true)
+
+-- Apply slot AFTER load (and ApplyAutoFarmSlot now definitely exists)
+ApplyAutoFarmSlot(Config.AutoFarmSlot or 1)
+
+-- Ensure click coord tables exist
+Config.ClickXY = Config.ClickXY or { X = 814, Y = 631 }
+Config.ClickXY2 = Config.ClickXY2 or { X = 771, Y = 650 }
+
+-- Sync to globals for embedded farm scripts
+getgenv().SlayerClickX = tonumber(Config.ClickXY.X) or 814
+getgenv().SlayerClickY = tonumber(Config.ClickXY.Y) or 631
+
+getgenv().DemonClickX = tonumber(Config.ClickXY2.X) or 771
+getgenv().DemonClickY = tonumber(Config.ClickXY2.Y) or 650
+
+
+-- Apply saved SpeedHub state on load (loads SpeedHub if enabled)
+-- Guard against LoadSpeedHub not existing yet (ordering issue)
+if Config.SpeedHubEnabled == true then
+    if typeof(LoadSpeedHub) == "function" then
+        ApplySpeedHubState(true)
+    else
+        -- If LoadSpeedHub is defined later in the file, delay this call
+        task.defer(function()
+            if typeof(LoadSpeedHub) == "function" then
+                ApplySpeedHubState(true)
+            end
+        end)
+    end
+else
+    ApplySpeedHubState(false)
+end
+
+
+
+-- ==============================================================================
+-- [HELPERS]
+-- ==============================================================================
+local function GetRoot(char)
+    return char.PrimaryPart or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function IsFacing(char, targetPos)
+    local root = GetRoot(char)
+    if not root then return false end
+    local origin = root.Position
+    local lookVector = root.CFrame.LookVector
+    local direction = (targetPos - origin).Unit
+    return lookVector:Dot(direction) > Config.FacingDot
+end
+
+local function IsPlayerBusyCombatAnim()
+    local combatScript = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("CombatScript")
+    if combatScript and getsenv and debug and debug.getupvalue then
+        local env = getsenv(combatScript)
+        if env then
+             local isAttacking = env.IsAttacking or env.Attacking
+             if isAttacking == true then return true end
+        end
+    end
+
+    local myChar = LocalPlayer.Character
+    if not myChar then return false end
+    local hum = myChar:FindFirstChild("Humanoid")
+    if not hum then return false end
+
+    for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
+        local nm = (t.Name or ""):lower()
+        if nm:find("swing") or nm:find("skill") or nm:find("breath") then
+            return true
+        end
+    end
+    return false
+end
+
+local function HasExternalHighlight(character)
+    if not character then return false end
+    for _, inst in ipairs(character:GetChildren()) do
+        if inst:IsA("Highlight") and not inst:GetAttribute("ParryHubOwned") and inst.Name ~= "ParryHub_HL" then
+            return true
+        end
+    end
+    return false
+end
+
+local function GetVariantKey(enemyChar)
+    if not enemyChar then return "None" end
+    
+    -- [[ NEW: Check BDA First ]]
+    local bda = enemyChar:GetAttribute("StyleBDA")
+    if bda ~= nil and tostring(bda) ~= "" then
+        return tostring(bda)
+    end
+
+    local breath = enemyChar:GetAttribute("Breath")
+    if breath ~= nil and tostring(breath) ~= "" then
+        return tostring(breath)
+    end
+    
+    return "None"
+end
+
+local function CountTable(t)
+    local c = 0
+    for _ in pairs(t) do c = c + 1 end
+    return c
+end
+-- SPEED HUB CONTROLLER
+
+-- NEW: only use Breath-string variants for per-animation overrides (NOT StyleBDA players)
+local function GetBreathOnlyVariantKey(enemyChar)
+    if not enemyChar then return nil end
+
+    -- If they have StyleBDA, do NOT do breath-variant overrides
+    local bda = enemyChar:GetAttribute("StyleBDA")
+    if bda ~= nil and tostring(bda) ~= "" then
+        return nil
+    end
+
+    local breath = enemyChar:GetAttribute("Breath")
+    if breath ~= nil then
+        breath = tostring(breath)
+        if breath ~= "" then
+            return breath
+        end
+    end
+
+    return nil
+end
+
+-- NEW: detect if LocalPlayer is currently playing ANY animation we detect/react to
+local function IsLocalPlayerPlayingReactiveAnim()
+    local myChar = LocalPlayer.Character
+    if not myChar then return false end
+    local hum = myChar:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+
+    for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
+        local anim = t.Animation
+        if anim and anim.AnimationId then
+            local aid = tostring(anim.AnimationId)
+            if Config.ValidAnimationIds and Config.ValidAnimationIds[aid] then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- NEW: AnimOverride storage that supports:
+--   old: Config.AnimOverrides[animId] = number
+--   new: Config.AnimOverrides[animId] = { Default = number, Breaths = { ["Flame"]=number, ... } }
+local function GetAnimOverride(animId, breathKey)
+    if not Config.AnimOverrides then return nil end
+    local v = Config.AnimOverrides[tostring(animId)]
+    if v == nil then return nil end
+
+    if type(v) == "number" then
+        -- legacy single value
+        return v
+    end
+
+    if type(v) == "table" then
+        if breathKey and v.Breaths and v.Breaths[breathKey] ~= nil then
+            return tonumber(v.Breaths[breathKey])
+        end
+        if v.Default ~= nil then
+            return tonumber(v.Default)
+        end
+    end
+
+    return nil
+end
+
+local function SetAnimOverride(animId, breathKey, newPct, baseFallbackPct)
+    Config.AnimOverrides = Config.AnimOverrides or {}
+    animId = tostring(animId)
+
+    local cur = Config.AnimOverrides[animId]
+
+    -- If we were using group % and have no individual yet, create one.
+    -- This matches your current behavior (it already does this for numbers) :contentReference[oaicite:2]{index=2}
+    if type(cur) == "nil" then
+        if breathKey then
+            Config.AnimOverrides[animId] = {
+                Default = tonumber(baseFallbackPct) or 20,
+                Breaths = { [breathKey] = tonumber(newPct) }
+            }
+        else
+            Config.AnimOverrides[animId] = tonumber(newPct)
+        end
+        return
+    end
+
+    -- Legacy number → upgrade to table if we need Breath-specific
+    if type(cur) == "number" then
+        if breathKey then
+            Config.AnimOverrides[animId] = {
+                Default = tonumber(cur) or (tonumber(baseFallbackPct) or 20),
+                Breaths = { [breathKey] = tonumber(newPct) }
+            }
+        else
+            Config.AnimOverrides[animId] = tonumber(newPct)
+        end
+        return
+    end
+
+    -- Table form
+    if type(cur) == "table" then
+        if breathKey then
+            cur.Breaths = cur.Breaths or {}
+            cur.Breaths[breathKey] = tonumber(newPct)
+            cur.Default = tonumber(cur.Default) or (tonumber(baseFallbackPct) or 20)
+        else
+            cur.Default = tonumber(newPct)
+        end
+        Config.AnimOverrides[animId] = cur
+        return
+    end
+end
+
+
+
+-- ==============================================================================
+-- [FAILURE NOTIFICATION] (UPDATED)
+-- ==============================================================================
+local function SetupFailureDetection(char)
+    local hum = char:WaitForChild("Humanoid", 10)
+    if not hum then return end
+
+    -- Define Notification Logic
+    local function NotifyFail(reason, lossAmount)
+    local diff = tick() - LastParryTime
+
+    -- only consider it tied to our most recent parry attempt
+    if diff >= 1.0 then return end
+    if not Config.AutoAdjustEnabled then return end
+    if not LastParryAnimId then return end
+
+    -- Decide direction:
+    -- Health loss => DECREASE 1%
+    -- Posture loss => INCREASE 1%
+    local delta = 0
+    if reason == "Health Loss" then
+        delta = -1
+    elseif reason == "Posture Broken" then
+        delta = 1
+    else
+        return
+    end
+
+    Config.AnimOverrides = Config.AnimOverrides or {}
+
+    -- If this animation was previously only using a group %,
+    -- create its own override the first time we need to adjust it.
+    local current = Config.AnimOverrides[LastParryAnimId]
+    if current == nil then
+        current = tonumber(LastParryUsedPct) or 20
+    end
+
+    local newPct = math.clamp((tonumber(current) or 20) + delta, 1, 99)
+    Config.AnimOverrides[LastParryAnimId] = newPct
+
+    SaveManager:Save()
+
+    -- Log + small notify (optional)
+
+    syde:Notify({
+        Title = "AutoAdjust Updated",
+        Content = (LastParryAnimName or "Animation") .. " => " .. tostring(newPct) .. "%",
+        Duration = 2
+    })
+end
+
+
+    -- Health Tracking
+    local lastHealth = hum.Health
+    hum.HealthChanged:Connect(function(newHealth)
+        -- Only trigger if health went DOWN
+        if newHealth < lastHealth then
+            local loss = lastHealth - newHealth
+            NotifyFail("Health Loss", loss)
+        end
+        lastHealth = newHealth
+    end)
+    
+    -- Posture Tracking (Recursive + Threshold)
+    task.spawn(function()
+        local posture = char:FindFirstChild("Posture", true)
+        local attempts = 0
+        while not posture and attempts < 20 do
+            task.wait(0.5)
+            posture = char:FindFirstChild("Posture", true)
+            attempts = attempts + 1
+        end
+
+        if posture then
+            local lastPosture = posture.Value
+            posture.Changed:Connect(function(newPosture)
+                -- FIX: Only flag if loss is significant (> 2)
+                -- This prevents flagging the small "cost" of using a block/parry as a failure
+                if newPosture < (lastPosture - 2) then
+                    local loss = lastPosture - newPosture
+                    NotifyFail("Posture Broken", loss)
+                end
+                lastPosture = newPosture
+            end)
+        end
+    end)
+end
+
+-- ==============================================================================
+-- [LOCAL PLAYER RESPAWN FAIL TRACKING]
+-- ==============================================================================
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    task.wait(1) -- allow Humanoid/Posture to exist
+    SetupFailureDetection(newChar)
+end)
+
+
+-- ==============================================================================
+-- [UI SETUP]
+-- ==============================================================================
+local Window = syde:Init({
+    Title = 'The Zone',
+    SubText = 'we love kayo'
+})
+
+task.defer(function()
+    -- Only hide the loader if ANY autofarm is enabled
+    local slayerEnabled = (Config and Config.SpeedHubEnabled == true)
+    local demonEnabled = (getgenv().DemonAutoFarmEnabled == true)
+
+    if not (slayerEnabled or demonEnabled) then
+        return -- neither farm enabled → do nothing
+    end
+
+    local CoreGui = game:GetService("CoreGui")
+    local gui = CoreGui:FindFirstChild("sydeUILoader")
+
+    if gui and gui:FindFirstChild("lib") then
+        gui.lib.Visible = false
+    end
+end)
+
+
+
+
+
+task.spawn(function()
+    task.wait(0.2)
+    local gui = game:GetService("CoreGui"):FindFirstChild("Syde")
+    if not gui and LocalPlayer then
+        gui = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("Syde")
+    end
+    if gui then
+        gui.Enabled = false
+        syde:Notify({ Title = 'UI Hidden', Content = 'Press RightShift to Open', Duration = 4 })
+    end
+end)
+
+local MainTab = Window:InitTab({ Title = 'Main' })
+local AutoFarmTab = Window:InitTab({ Title = 'Auto Farm' }) -- ✅ NEW TAB
+
+
+
+local TeleportTab = Window:InitTab({ Title = 'Teleports + Bosses' }) -- ✅ NEW TAB
+--// ===== TELEPORT TAB BUTTONS (Teleporters + Boss Spawns) =====
+-- Put this inside wherever you set up `TeleportTab`
+
+local Players = game:GetService("Players")
+local lp = Players.LocalPlayer
+
+local function getHRP()
+    local char = lp.Character or lp.CharacterAdded:Wait()
+    return char:WaitForChild("HumanoidRootPart")
+end
+
+local function getTeleportCFrame(inst)
+    if inst:IsA("BasePart") then
+        return inst.CFrame
+    elseif inst:IsA("Model") then
+        if inst.PrimaryPart and inst.PrimaryPart:IsA("BasePart") then
+            return inst.PrimaryPart.CFrame
+        end
+        local part = inst:FindFirstChildWhichIsA("BasePart", true)
+        return part and part.CFrame or nil
+    end
+    return nil
+end
+
+local function tpTo(inst, yOffset)
+    local cf = getTeleportCFrame(inst)
+    if not cf then return end
+    local hrp = getHRP()
+    hrp.CFrame = cf + Vector3.new(0, yOffset or 6, 0)
+end
+
+-- =========================
+-- TELEPORTERS SECTION
+-- =========================
+TeleportTab:Section("Teleporters", "8932620770")
+
+local teleportersFolder = workspace:FindFirstChild("Teleporters")
+if teleportersFolder then
+    local kids = teleportersFolder:GetChildren()
+    table.sort(kids, function(a, b) return a.Name < b.Name end)
+
+    for _, tele in ipairs(kids) do
+    if tele:IsA("BasePart") then
+        TeleportTab:Button({
+            Title = tele.Name,
+            Description = "Teleport to " .. tele.Name,
+            CallBack = function()
+                tpTo(tele, 6)
+            end
+        })
+    end
+end
+
+else
+    TeleportTab:Button({
+        Title = "Teleporters folder not found",
+        Description = "workspace.Teleporters is missing",
+        CallBack = function() end
+    })
+end
+
+-- =========================
+-- BOSSES SECTION
+-- =========================
+TeleportTab:Section("Bosses", "8932620770")
+
+local bossSpawns = {}
+for _, inst in ipairs(workspace:GetDescendants()) do
+    if inst:IsA("BasePart") and inst.Name == "bossspawn" then
+        table.insert(bossSpawns, inst)
+    end
+end
+
+table.sort(bossSpawns, function(a, b)
+    local an = tostring(a:GetAttribute("BossToSpawn") or a.Name)
+    local bn = tostring(b:GetAttribute("BossToSpawn") or b.Name)
+    return an < bn
+end)
+
+if #bossSpawns > 0 then
+    for _, spawnPart in ipairs(bossSpawns) do
+        local bossName = tostring(spawnPart:GetAttribute("BossToSpawn") or "Boss")
+        TeleportTab:Button({
+            Title = bossName,
+            Description = "Teleport to " .. bossName .. " spawn",
+            CallBack = function()
+                tpTo(spawnPart, 8)
+            end
+        })
+    end
+else
+    TeleportTab:Button({
+        Title = "No Bosses",
+        Description = "No bosses here",
+        CallBack = function() end
+    })
+end
+
+-- =========================
+-- BOSS COMBAT LOCK TOGGLE BUTTON (no Y key)
+-- Put this UNDER the Bosses teleport buttons
+-- =========================
+
+getgenv().BossCombatLockEnabled = getgenv().BossCombatLockEnabled or false
+getgenv().BossCombatLockSetup = getgenv().BossCombatLockSetup or false
+
+TeleportTab:Section("Auto Boss", "8932620770")
+
+TeleportTab:Button({
+    Title = "Toggle Auto Boss",
+    Description = "ONLY ENABLE AFTER YOU ARE TELEPORTED TO BOSS AREA, Enable then walk to NPCS",
+    CallBack = function()
+        getgenv().BossCombatLockEnabled = not getgenv().BossCombatLockEnabled
+        syde:Notify({
+            Title = "Boss Combat Lock",
+            Content = getgenv().BossCombatLockEnabled and "Enabled" or "Disabled",
+            Duration = 2
+        })
+
+        -- If turning OFF, do cleanup immediately
+        if not getgenv().BossCombatLockEnabled and getgenv().BossCombatLockCleanup then
+            pcall(getgenv().BossCombatLockCleanup)
+        end
+    end
+})
+
+-- One-time setup: create the loop once, then the button just flips the flag
+if not getgenv().BossCombatLockSetup then
+    getgenv().BossCombatLockSetup = true
+
+    local Players = game:GetService("Players")
+    local Workspace = game:GetService("Workspace")
+    local RunService = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
+
+    local LocalPlayer = Players.LocalPlayer
+    local LiveFolder = Workspace:WaitForChild("Live")
+
+    local CombatCfg = {
+        Radius = 40,
+        Height = 10.5,
+        BackOffset = 0,
+        TweenTime = 0.001,
+    }
+
+    local currentTarget = nil
+    local inCombatLock = false
+
+    local function GetCharacterParts()
+        local char = LocalPlayer.Character
+        if not char then return nil, nil, nil end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        return char, hum, hrp
+    end
+
+    local function getNPCPrimaryPart(model)
+        if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+            return model.PrimaryPart
+        end
+        local hrp2 = model:FindFirstChild("HumanoidRootPart")
+        if hrp2 and hrp2:IsA("BasePart") then
+            return hrp2
+        end
+        return nil
+    end
+
+    local function isNPCModel(inst)
+        return inst
+            and inst:IsA("Model")
+            and inst.Name:sub(1, 4) == "NPC_"
+            and inst:IsDescendantOf(LiveFolder)
+    end
+
+    local function computeHoverCFrame(npcPart, height, backOffset)
+        local base = npcPart.CFrame
+        local pos = base.Position + base.UpVector * height + base.LookVector * backOffset
+        return CFrame.lookAt(pos, npcPart.Position)
+    end
+
+    local function tweenHRPTo(hrp, targetCF, tweenTime)
+        if not hrp or not hrp.Parent then return end
+        local t = TweenService:Create(
+            hrp,
+            TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { CFrame = targetCF }
+        )
+        t:Play()
+    end
+
+    local function setMovementLocked(isLocked)
+        local _, hum, _ = GetCharacterParts()
+        if not hum then return end
+        if isLocked then
+            hum.PlatformStand = true
+            hum.AutoRotate = false
+        else
+            hum.PlatformStand = false
+            hum.AutoRotate = true
+        end
+    end
+
+    local function FireCombatRemote()
+        local char = LocalPlayer.Character
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        if not char or not backpack then return end
+
+        local tool = char:FindFirstChild("Combat") or backpack:FindFirstChild("Combat")
+        if not tool then return end
+
+        -- ensure equipped
+        if tool.Parent == backpack then
+            local equipRemote = tool:FindFirstChild("ToggleEquip")
+            if equipRemote and equipRemote:IsA("RemoteEvent") then
+                pcall(function() equipRemote:FireServer(true) end)
+            end
+            tool.Parent = char
+        end
+
+        -- attack
+        local actRemote = tool:FindFirstChild("ToggleActivated")
+        if actRemote and actRemote:IsA("RemoteEvent") then
+            pcall(function() actRemote:FireServer(true) end)
+        end
+    end
+
+    local function SpamKeys()
+        local VirtualInputManager = game:GetService("VirtualInputManager")
+        local keys = {
+            Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four,
+            Enum.KeyCode.Five, Enum.KeyCode.Six, Enum.KeyCode.Seven,
+            Enum.KeyCode.Eight, Enum.KeyCode.Nine
+        }
+
+        for _, key in ipairs(keys) do
+            VirtualInputManager:SendKeyEvent(true, key, false, game)
+            task.wait()
+            VirtualInputManager:SendKeyEvent(false, key, false, game)
+        end
+    end
+
+    local function FindClosestNPC()
+        local _, _, hrp = GetCharacterParts()
+        if not hrp then return nil end
+
+        local closest = nil
+        local minDist = CombatCfg.Radius
+
+        for _, v in ipairs(LiveFolder:GetChildren()) do
+            if isNPCModel(v) then
+                local hum = v:FindFirstChild("Humanoid")
+                local root = getNPCPrimaryPart(v)
+                if hum and root and hum.Health > 0 then
+                    local dist = (root.Position - hrp.Position).Magnitude
+                    if dist < minDist then
+                        minDist = dist
+                        closest = v
+                    end
+                end
+            end
+        end
+        return closest
+    end
+
+    -- expose cleanup so OFF toggle can reset instantly
+    getgenv().BossCombatLockCleanup = function()
+        setMovementLocked(false)
+        inCombatLock = false
+        currentTarget = nil
+    end
+
+    -- Main loop (always connected once; runs only when enabled)
+    RunService.RenderStepped:Connect(function()
+        if not getgenv().BossCombatLockEnabled then return end
+
+        local _, hum, hrp = GetCharacterParts()
+        if not hrp or not hum or hum.Health <= 0 then
+            inCombatLock = false
+            return
+        end
+
+        -- validate target
+        if currentTarget then
+            local tHum = currentTarget:FindFirstChild("Humanoid")
+            local tRoot = getNPCPrimaryPart(currentTarget)
+
+            if not tHum or tHum.Health <= 0 or not tRoot
+                or (tRoot.Position - hrp.Position).Magnitude > CombatCfg.Radius + 10
+            then
+                currentTarget = nil
+                inCombatLock = false
+                setMovementLocked(false)
+            end
+        end
+
+        -- acquire target
+        if not currentTarget then
+            currentTarget = FindClosestNPC()
+        end
+
+        -- execute
+        if currentTarget then
+            local tRoot = getNPCPrimaryPart(currentTarget)
+            if tRoot then
+                if not inCombatLock then
+                    setMovementLocked(true)
+                    tweenHRPTo(hrp, computeHoverCFrame(tRoot, CombatCfg.Height, CombatCfg.BackOffset), CombatCfg.TweenTime)
+                    inCombatLock = true
+                else
+                    hrp.CFrame = computeHoverCFrame(tRoot, CombatCfg.Height, CombatCfg.BackOffset)
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                    hrp.AssemblyAngularVelocity = Vector3.zero
+                end
+
+                FireCombatRemote()
+                task.spawn(SpamKeys)
+            end
+        else
+            if inCombatLock then
+                setMovementLocked(false)
+                inCombatLock = false
+            end
+        end
+    end)
+end
+
+
+
+local BreathTab = Window:InitTab({ Title = 'Breaths' })
+
+local DemonTab = Window:InitTab({ Title = 'Demons' }) -- [[ NEW TAB ]]
+local SkillTab = Window:InitTab({ Title = 'Skills' })
+
+MainTab:Section('Toggles', '8932620770')
+
+
+local UserInputService = game:GetService("UserInputService")
+
+local function GetMouseXY()
+    local p = UserInputService:GetMouseLocation()
+    return math.floor(p.X), math.floor(p.Y)
+end
+
+local function SetSlotXY(slot, x, y)
+    Config.AutoFarmSlots = Config.AutoFarmSlots or {}
+    Config.AutoFarmSlots[slot] = Config.AutoFarmSlots[slot] or {}
+    Config.AutoFarmSlots[slot].X = tonumber(x)
+    Config.AutoFarmSlots[slot].Y = tonumber(y)
+    SaveManager:Save()
+
+    -- if editing currently selected slot, apply live
+    if tonumber(Config.AutoFarmSlot) == slot then
+        ApplyAutoFarmSlot(slot)
+    end
+end
+
+local function SetSlayerClickXY(x, y)
+    Config.ClickXY = Config.ClickXY or {}
+    Config.ClickXY.X = tonumber(x)
+    Config.ClickXY.Y = tonumber(y)
+    getgenv().SlayerClickX = tonumber(Config.ClickXY.X) or 814
+    getgenv().SlayerClickY = tonumber(Config.ClickXY.Y) or 631
+    SaveManager:Save()
+end
+
+local function SetDemonClickXY(x, y)
+    Config.ClickXY2 = Config.ClickXY2 or {}
+    Config.ClickXY2.X = tonumber(x)
+    Config.ClickXY2.Y = tonumber(y)
+    getgenv().DemonClickX = tonumber(Config.ClickXY2.X) or 771
+    getgenv().DemonClickY = tonumber(Config.ClickXY2.Y) or 650
+    SaveManager:Save()
+end
+
+
+
+
+-- Builds section title text
+local function GetSlotLabelText()
+    return "AutoFarm Click Slot (Selected: Slot " .. tostring(Config.AutoFarmSlot or 1) .. ")"
+end
+
+-- Create the section ONCE
+local SlotSection = AutoFarmTab:Section(
+    GetSlotLabelText(),
+    "8932620770"
+)
+
+-- Call this whenever the slot changes
+local function UpdateSlotSection()
+    if SlotSection and SlotSection.SetTitle then
+        SlotSection:SetTitle(GetSlotLabelText())
+    elseif SlotSection and SlotSection.Title then
+        -- fallback for libs that expose Title directly
+        SlotSection.Title.Text = GetSlotLabelText()
+    end
+end
+
+
+-- Slot select buttons (radio behavior)
+AutoFarmTab:Button({
+    Title = "Slot 1",
+    Description = "Slot 1",
+    CallBack = function()
+        ApplyAutoFarmSlot(1)
+        syde:Notify({ Title = "AutoFarm Slot", Content = "Selected Slot 1", Duration = 2 })
+        -- refresh section header (Syde usually doesn't support editing section text;
+        -- if it does, ignore. This is harmless.)
+        AutoFarmTab:Section(SlotLabel(), "8932620770")
+    end
+})
+
+AutoFarmTab:Button({
+    Title = "Slot 2",
+    Description = "Slot 2",
+    CallBack = function()
+        ApplyAutoFarmSlot(2)
+        syde:Notify({ Title = "AutoFarm Slot", Content = "Selected Slot 2", Duration = 2 })
+        AutoFarmTab:Section(SlotLabel(), "8932620770")
+    end
+})
+
+AutoFarmTab:Button({
+    Title = "Slot 3",
+    Description = "Slot 3",
+    CallBack = function()
+        ApplyAutoFarmSlot(3)
+        syde:Notify({ Title = "AutoFarm Slot", Content = "Selected Slot 3", Duration = 2 })
+        AutoFarmTab:Section(SlotLabel(), "8932620770")
+    end
+})
+
+for slot = 1, 3 do
+    AutoFarmTab:Section("Slot " .. slot .. " Coordinates", "8932620770")
+
+    
+
+    AutoFarmTab:TextInput({
+        Title = "Slot " .. slot .. " X",
+        MaxSize = 6,
+        PlaceHolder = tostring((Config.AutoFarmSlots[slot] and Config.AutoFarmSlots[slot].X) or 900),
+        CallBack = function(v)
+            local curY = (Config.AutoFarmSlots[slot] and Config.AutoFarmSlots[slot].Y) or 700
+            SetSlotXY(slot, tonumber(v), curY)
+        end
+    })
+
+    AutoFarmTab:TextInput({
+        Title = "Slot " .. slot .. " Y",
+        MaxSize = 6,
+        PlaceHolder = tostring((Config.AutoFarmSlots[slot] and Config.AutoFarmSlots[slot].Y) or 700),
+        CallBack = function(v)
+            local curX = (Config.AutoFarmSlots[slot] and Config.AutoFarmSlots[slot].X) or 900
+            SetSlotXY(slot, curX, tonumber(v))
+        end
+    })
+end
+
+
+-- (Optional) quick view of current X/Y
+do
+    local slot = tonumber(Config.AutoFarmSlot) or 1
+    local s = Config.AutoFarmSlots and Config.AutoFarmSlots[slot]
+    local x = s and s.X or (getgenv().AutoFarmEmptyLiveX or 900)
+    local y = s and s.Y or (getgenv().AutoFarmEmptyLiveY or 700)
+
+    AutoFarmTab:Button({
+        Title = "Show selected slot",
+        Description = "Shows current selected slow",
+        CallBack = function()
+            local slotNow = tonumber(Config.AutoFarmSlot) or 1
+            local ss = Config.AutoFarmSlots and Config.AutoFarmSlots[slotNow]
+            local xx = ss and ss.X or (getgenv().AutoFarmEmptyLiveX or 900)
+            local yy = ss and ss.Y or (getgenv().AutoFarmEmptyLiveY or 700)
+            syde:Notify({ Title = "AutoFarm XY", Content = "Slot " .. slotNow .. " -> " .. xx .. ", " .. yy, Duration = 3 })
+        end
+    })
+end
+
+
+
+
+AutoFarmTab:Section("Enable", "8932620770")
+
+AutoFarmTab:Toggle({
+    Title = "Slayer Farm",
+    Value = Config.SpeedHubEnabled,
+    Config = false,
+    CallBack = function(v)
+        ApplySpeedHubState(v)
+    end
+})
+
+AutoFarmTab:Section("Slayer Queue Position", "8932620770")
+
+
+
+AutoFarmTab:TextInput({
+    Title = "CLICK_X",
+    MaxSize = 6,
+    PlaceHolder = tostring((Config.ClickXY and Config.ClickXY.X) or 814),
+    CallBack = function(v)
+        local y = (Config.ClickXY and Config.ClickXY.Y) or 631
+        SetSlayerClickXY(tonumber(v), y)
+    end
+})
+
+AutoFarmTab:TextInput({
+    Title = "Slayer Queue Y",
+    MaxSize = 6,
+    PlaceHolder = tostring((Config.ClickXY and Config.ClickXY.Y) or 631),
+    CallBack = function(v)
+        local x = (Config.ClickXY and Config.ClickXY.X) or 814
+        SetSlayerClickXY(x, tonumber(v))
+    end
+})
+
+-- Helper (only needs to exist once)
+local function StringToKeyCode(str)
+    if not str then return nil end
+    str = tostring(str)
+    return Enum.KeyCode[str:upper()] or Enum.KeyCode[str]
+end
+
+local function OnAutoParryKeyChanged(newKey)
+    -- newKey might be Enum.KeyCode OR a string depending on Syde fork
+    if typeof(newKey) == "EnumItem" then
+        Config.AutoParryKey = newKey.Name
+    else
+        Config.AutoParryKey = tostring(newKey)
+    end
+
+    SaveManager:Save()
+
+    syde:Notify({
+        Title = "Keybind Updated",
+        Content = "Auto Parry key set to " .. tostring(Config.AutoParryKey),
+        Duration = 2
+    })
+end
+
+MainTab:Keybind({
+    Title = "Toggle Auto Parry",
+    Key = StringToKeyCode(Config.AutoParryKey) or Enum.KeyCode.L,
+
+    CallBack = function()
+        Config.ParryEnabled = not Config.ParryEnabled
+        SaveManager:Save()
+
+        syde:Notify({
+            Title = "Auto Parry",
+            Content = Config.ParryEnabled and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end,
+
+    -- Different Syde forks use different names — include all:
+    ChangedCallback = OnAutoParryKeyChanged,
+    OnChanged       = OnAutoParryKeyChanged,
+    Changed         = OnAutoParryKeyChanged,
+    KeyChanged      = OnAutoParryKeyChanged,
+})
+
+
+MainTab:Toggle({
+    Title = "Ignore Same Race",
+    Value = (Config.IgnoreSameRace == true),
+    Config = false,
+    CallBack = function(v)
+        Config.IgnoreSameRace = (v == true)
+        SaveManager:Save()
+
+        syde:Notify({
+            Title = "Ignore Same Race",
+            Content = Config.IgnoreSameRace and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+
+
+--[[
+MainTab:Toggle({
+    Title = "Automatic Adjustment",
+    Value = Config.AutoAdjustEnabled,
+    Config = false,
+    CallBack = function(v)
+        Config.AutoAdjustEnabled = (v == true)
+        SaveManager:Save()
+        syde:Notify({
+            Title = "Automatic Adjustment",
+            Content = Config.AutoAdjustEnabled and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+]]
+
+AutoFarmTab:Toggle({
+    Title = "Demon Autofarm",
+    Value = getgenv().DemonAutoFarmEnabled,
+    Config = false,
+    CallBack = function(v)
+        v = (v == true)
+
+        -- Runtime flag
+        getgenv().DemonAutoFarmEnabled = v
+
+        -- Config (for autosave)
+        Config.DemonAutoFarmEnabled = v
+
+        -- Save immediately
+        SaveManager:Save()
+
+        -- Notify
+        syde:Notify({
+            Title = "Demon Autofarm",
+            Content = v and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+AutoFarmTab:Section("Demon Farm Queue Position", "8932620770")
+
+
+
+AutoFarmTab:TextInput({
+    Title = "Demon Queue X",
+    MaxSize = 6,
+    PlaceHolder = tostring((Config.ClickXY2 and Config.ClickXY2.X) or 771),
+    CallBack = function(v)
+        local y = (Config.ClickXY2 and Config.ClickXY2.Y) or 650
+        SetDemonClickXY(tonumber(v), y)
+    end
+})
+
+AutoFarmTab:TextInput({
+    Title = "Demon Queue Y",
+    MaxSize = 6,
+    PlaceHolder = tostring((Config.ClickXY2 and Config.ClickXY2.Y) or 650),
+    CallBack = function(v)
+        local x = (Config.ClickXY2 and Config.ClickXY2.X) or 771
+        SetDemonClickXY(x, tonumber(v))
+    end
+})
+
+-- ===== Mouse XY Notifier (UNDER Demon Queue Y) =====
+getgenv().MouseXYNotifyEnabled = getgenv().MouseXYNotifyEnabled or false
+
+AutoFarmTab:Toggle({
+    Title = "Show Mouse Possition",
+    Value = getgenv().MouseXYNotifyEnabled,
+    Config = false,
+    CallBack = function(v)
+        getgenv().MouseXYNotifyEnabled = (v == true)
+        syde:Notify({
+            Title = "Mouse XY Notifier",
+            Content = getgenv().MouseXYNotifyEnabled and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+AutoFarmTab:Keybind({
+    Title = "Show Mouse Pos Button",
+    Key = Enum.KeyCode.KeypadNine, -- default: Numpad 9
+    CallBack = function()
+        if not getgenv().MouseXYNotifyEnabled then return end
+        local mx, my = GetMouseXY()
+        syde:Notify({
+            Title = "Mouse XY",
+            Content = tostring(mx) .. ", " .. tostring(my),
+            Duration = 2
+        })
+    end
+})
+
+
+
+-- ===== ESP enable/disable helpers (put ABOVE the Toggle) =====
+local function RemoveESPFromCharacter(character)
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    local a = rootPart:FindFirstChild("StatusESP")
+    if a then a:Destroy() end
+
+    local b = rootPart:FindFirstChild("HealthESP")
+    if b then b:Destroy() end
+end
+
+local function RemoveAllESP()
+    -- Players
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            RemoveESPFromCharacter(p.Character)
+        end
+    end
+
+    -- NPCs / models if you use a target folder
+    if Config.TargetFolder then
+        for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+            if m:IsA("Model") then
+                RemoveESPFromCharacter(m)
+            end
+        end
+    end
+end
+
+local function CreateESPForEveryone()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            task.spawn(function() CreateESP(p.Character) end)
+        end
+    end
+
+    if Config.TargetFolder then
+        for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+            if m:IsA("Model") then
+                task.spawn(function() CreateESP(m) end)
+            end
+        end
+    end
+end
+
+local function ApplyESPState(enabled)
+    enabled = (enabled == true)
+    Config.ESPEnabled = enabled
+    SaveManager:Save()
+
+    if enabled then
+        CreateESPForEveryone()
+    else
+        RemoveAllESP()
+    end
+end
+-- ===== ESP Re-enable Safe System =====
+local ESPHooksSetup = false
+
+local function RemoveESPFromCharacter(character)
+	if not character then return end
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+
+	local a = rootPart:FindFirstChild("StatusESP")
+	if a then a:Destroy() end
+
+	-- If you have separate health billboard, keep this too:
+	local b = rootPart:FindFirstChild("HealthESP")
+	if b then b:Destroy() end
+end
+
+local function RemoveAllESP()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			RemoveESPFromCharacter(p.Character)
+		end
+	end
+
+	if Config.TargetFolder then
+		for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+			if m:IsA("Model") then
+				RemoveESPFromCharacter(m)
+			end
+		end
+	end
+end
+
+local function CreateESPForEveryone()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			task.spawn(function() CreateESP(p.Character) end)
+		end
+	end
+
+	if Config.TargetFolder then
+		for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+			if m:IsA("Model") then
+				task.spawn(function() CreateESP(m) end)
+			end
+		end
+	end
+end
+
+local function SetupESPHooks()
+	if ESPHooksSetup then return end
+	ESPHooksSetup = true
+
+	-- Players: future spawns
+	for _, p in ipairs(Players:GetPlayers()) do
+		p.CharacterAdded:Connect(function(char)
+			task.wait(0.25)
+			if Config.ESPEnabled then
+				CreateESP(char)
+			end
+		end)
+	end
+
+	Players.PlayerAdded:Connect(function(p)
+		p.CharacterAdded:Connect(function(char)
+			task.wait(0.25)
+			if Config.ESPEnabled then
+				CreateESP(char)
+			end
+		end)
+	end)
+
+	-- NPC folder: future spawns (optional)
+	if Config.TargetFolder then
+		Config.TargetFolder.ChildAdded:Connect(function(child)
+			if not child:IsA("Model") then return end
+			task.wait(0.25)
+			if Config.ESPEnabled then
+				CreateESP(child)
+			end
+		end)
+	end
+end
+
+local function ApplyESPState(enabled)
+	enabled = (enabled == true)
+	Config.ESPEnabled = enabled
+	SaveManager:Save()
+
+	SetupESPHooks()
+
+	if enabled then
+		CreateESPForEveryone()
+	else
+		RemoveAllESP()
+	end
+end
+
+
+MainTab:Toggle({
+	Title = "ESP",
+	Value = (Config.ESPEnabled == true),
+	Config = false,
+	CallBack = function(v)
+		ApplyESPState(v)
+
+		syde:Notify({
+			Title = "ESP Visuals",
+			Content = (Config.ESPEnabled and "Enabled" or "Disabled"),
+			Duration = 2
+		})
+	end
+})
+
+
+
+
+MainTab:Section('Global', '8932620770')
+MainTab:CreateSlider({
+    Title = 'Detection Range',
+    Sliders = {
+        {
+            Title = 'Max Dist',
+            Range = {5, 100},
+            Increment = 1,
+            StarterValue = Config.AwarenessRange,
+            CallBack = function(v) 
+                Config.AwarenessRange = v 
+                SaveManager:Save() -- Auto Save
+            end
+        }
+    }
+})
+
+MainTab:CreateSlider({
+    Title = "NPC Reaction Timing",
+    Sliders = {
+        {
+            Title = "Reaction %",
+            Range = {1, 99},
+            Increment = 1,
+            StarterValue = (Config.NPC and Config.NPC.ReactionPct) or 19,
+            CallBack = function(v)
+                Config.NPC = Config.NPC or {}
+                Config.NPC.ReactionPct = v
+                SaveManager:Save()
+            end
+        }
+    }
+})
+
+
+-- [[ BREATH SLIDERS ]]
+for breathName, data in pairs(Config.Breaths) do
+    BreathTab:Section(breathName .. ' Settings', '8932620770')
+    BreathTab:CreateSlider({
+        Title = breathName .. ' Timing',
+        Sliders = {
+            {
+                Title = 'Skill Base (%)',
+                Range = {1, 99},
+                Increment = 1,
+                StarterValue = data.SkillPct,
+                CallBack = function(v) 
+                    Config.Breaths[breathName].SkillPct = v 
+                    SaveManager:Save() -- Auto Save
+                end
+            },
+            {
+                Title = 'Combat (%)',
+                Range = {1, 99},
+                Increment = 1,
+                StarterValue = data.CombatPct,
+                CallBack = function(v) 
+                    Config.Breaths[breathName].CombatPct = v 
+                    SaveManager:Save() -- Auto Save
+                end
+            }
+        }
+    })
+end
+
+local sortedDemons = {}
+for name, _ in pairs(Config.Demons) do table.insert(sortedDemons, name) end
+table.sort(sortedDemons)
+
+DemonTab:Section('Blood Demon Arts', '8932620770')
+for _, demonName in ipairs(sortedDemons) do
+    local data = Config.Demons[demonName]
+
+    DemonTab:CreateSlider({
+        Title = demonName,
+        Sliders = {
+            {
+                Title = "Reaction %",
+                Range = {1, 99},
+                Increment = 1,
+                StarterValue = data.ReactionPct,
+                CallBack = function(v)
+                    data.ReactionPct = v
+                    SaveManager:Save()
+                end
+            },
+            {
+                Title = "Range",
+                Range = {6, 30},
+                Increment = 1,
+                StarterValue = data.Range,
+                CallBack = function(v)
+                    data.Range = v
+                    SaveManager:Save()
+                end
+            }
+        }
+    })
+end
+
+
+-- [[ SKILL SLIDERS ]]
+-- Sort alphabetical for cleanliness
+local sortedSkills = {}
+for name, _ in pairs(Config.Skills) do table.insert(sortedSkills, name) end
+table.sort(sortedSkills)
+
+SkillTab:Section('Specific Skills', '8932620770')
+for _, skillName in ipairs(sortedSkills) do
+    SkillTab:CreateSlider({
+        Title = skillName,
+        Sliders = {
+            {
+                Title = 'Reaction %',
+                Range = {1, 99},
+                Increment = 1,
+                StarterValue = Config.Skills[skillName],
+                CallBack = function(v) 
+                    Config.Skills[skillName] = v 
+                    SaveManager:Save() -- Auto Save
+                end
+            }
+        }
+    })
+end
+
+-- ==============================================================================
+-- [LOGIC CORE]
+-- ==============================================================================
+getgenv().LoadValidAnimations = function()
+    syde:Notify({ Title = 'System', Content = 'Loading Animations...', Duration = 3 })
+
+    Config.ValidAnimationIds = {}
+	Config.NPCAnimIdToName = {}
+Config.CombatAnimIdToName = {}
+    Config.SkillAnimIdToName = {}
+    Config.SkillNameToAnimId = {}
+
+    local Assets = ReplicatedStorage:WaitForChild("Assets", 10)
+    if not Assets then return warn("No Assets") end
+
+    local Anims = Assets:WaitForChild("Animations", 10)
+    if not Anims then return warn("No Animations") end
+
+    local function Scan(folder, category)
+        if not folder then return end
+        for _, obj in ipairs(folder:GetDescendants()) do
+            if obj:IsA("Animation") then
+                local animId = tostring(obj.AnimationId)
+                Config.ValidAnimationIds[animId] = category
+
+				-- ✅ Build NPC ID -> Name mapping from NPCAnimPacks
+if category == "NPC" then
+    Config.NPCAnimIdToName[animId] = obj.Name
+end
+
+if category == "Combat" then
+    Config.CombatAnimIdToName[animId] = obj.Name
+end
+
+                -- ✅ Build skill name mapping from BOTH Skills + BreathAnims
+                if category == "Skills" or category == "Breath" then
+                    local skillName = obj.Name
+                    Config.SkillAnimIdToName[animId] = skillName
+                    Config.SkillNameToAnimId[skillName] = animId
+                end
+            end
+        end
+    end
+
+    -- Core sources
+    Scan(Anims:FindFirstChild("Combat"), "Combat")
+
+    Scan(Anims:FindFirstChild("NPCAnimPacks"), "NPC")
+
+    -- ✅ Skill sources (including nested folders)
+    Scan(Anims:FindFirstChild("Skills"), "Skills")
+    Scan(Anims:FindFirstChild("BreathAnims"), "Breath")
+
+    syde:Notify({
+        Title = 'Success',
+        Content = 'Loaded IDs: ' .. CountTable(Config.ValidAnimationIds),
+        Duration = 5
+    })
+end
+
+local function RemoveESPFromCharacter(character)
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    -- Delete BOTH billboards (your separate health gui + status gui)
+    local a = rootPart:FindFirstChild("StatusESP")
+    if a then a:Destroy() end
+
+    local b = rootPart:FindFirstChild("HealthESP")
+    if b then b:Destroy() end
+end
+
+local function RemoveAllESP()
+    -- Players
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            RemoveESPFromCharacter(p.Character)
+        end
+    end
+
+    -- Target folder models (NPCs etc)
+    if Config.TargetFolder then
+        for _, child in ipairs(Config.TargetFolder:GetChildren()) do
+            if child:IsA("Model") then
+                RemoveESPFromCharacter(child)
+            end
+        end
+    end
+end
+
+local function CreateESPForEveryone()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            task.spawn(function() CreateESP(p.Character) end)
+        end
+    end
+
+    if Config.TargetFolder then
+        for _, child in ipairs(Config.TargetFolder:GetChildren()) do
+            if child:IsA("Model") then
+                task.spawn(function() CreateESP(child) end)
+            end
+        end
+    end
+end
+
+local function ApplyESPState(enabled)
+    enabled = (enabled == true)
+    Config.ESPEnabled = enabled
+    SaveManager:Save()
+
+    if not enabled then
+        RemoveAllESP()
+    else
+        CreateESPForEveryone()
+    end
+end
+
+
+-- ==============================================================================
+-- [ESP LOGIC] (Stylized Bars + Lifeforce Red)
+-- ==============================================================================
+
+local TweenService = game:GetService("TweenService")
+
+local function UpdateBar(frame, current, max)
+    if max <= 0 then max = 1 end
+    local percent = math.clamp(current / max, 0, 1)
+
+    TweenService:Create(
+        frame,
+        TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { Size = UDim2.new(1, 0, percent, 0) }
+    ):Play()
+end
+
+local function StyleBar(bg, fill, gradientColors)
+    -- Rounded corners
+    local c1 = Instance.new("UICorner")
+    c1.CornerRadius = UDim.new(0.4, 0)
+    c1.Parent = bg
+
+    local c2 = Instance.new("UICorner")
+    c2.CornerRadius = UDim.new(0.4, 0)
+    c2.Parent = fill
+
+    -- Outline
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(0, 0, 0)
+    stroke.Thickness = 1
+    stroke.Transparency = 0.4
+    stroke.Parent = bg
+
+    -- Gradient
+    local grad = Instance.new("UIGradient")
+    grad.Rotation = 90
+    grad.Color = gradientColors
+    grad.Parent = fill
+end
+
+local function CreateESP(character)
+    if not Config.ESPEnabled then return end
+    if character == LocalPlayer.Character then return end
+
+    if string.sub(character.Name, 1, 4) == "NPC_" then
+        local race = character:GetAttribute("Race")
+        if not race or race == "Human" then return end
+    end
+
+    local rootPart = character:WaitForChild("HumanoidRootPart", 5)
+    local humanoid = character:WaitForChild("Humanoid", 5)
+    if not rootPart or not humanoid then return end
+    if rootPart:FindFirstChild("StatusESP") then return end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "StatusESP"
+    billboard.Adornee = rootPart
+    billboard.Size = UDim2.new(2, 0, 3, 0)
+    billboard.StudsOffset = Vector3.new(3, 0, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = rootPart
+
+    -- =========================
+    -- HEALTH BAR
+    -- =========================
+    local healthBg = Instance.new("Frame")
+    healthBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    healthBg.BackgroundTransparency = 0.1
+    healthBg.BorderSizePixel = 0
+    healthBg.Size = UDim2.new(0.1, 0, 1.3, 0)
+    healthBg.Position = UDim2.new(0.15, 0, -0.075, 0)
+    healthBg.Parent = billboard
+
+    local healthFill = Instance.new("Frame")
+    healthFill.AnchorPoint = Vector2.new(0, 1)
+    healthFill.Position = UDim2.new(0, 0, 1, 0)
+    healthFill.Size = UDim2.new(1, 0, 1, 0)
+    healthFill.BorderSizePixel = 0
+    healthFill.Parent = healthBg
+
+    StyleBar(
+        healthBg,
+        healthFill,
+        ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 90, 40)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 220, 100)),
+        })
+    )
+
+    -- =========================
+    -- LIFEFORCE BAR (RED)
+    -- =========================
+    local lifeBg = Instance.new("Frame")
+    lifeBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    lifeBg.BackgroundTransparency = 0.1
+    lifeBg.BorderSizePixel = 0
+    lifeBg.Size = UDim2.new(0.1, 0, 1, 0)
+    lifeBg.Position = UDim2.new(0.45, 0, 0, 0)
+    lifeBg.Visible = false
+    lifeBg.Parent = billboard
+
+    local lifeFill = Instance.new("Frame")
+    lifeFill.AnchorPoint = Vector2.new(0, 1)
+    lifeFill.Position = UDim2.new(0, 0, 1, 0)
+    lifeFill.Size = UDim2.new(1, 0, 1, 0)
+    lifeFill.BorderSizePixel = 0
+    lifeFill.Parent = lifeBg
+
+    StyleBar(
+        lifeBg,
+        lifeFill,
+        ColorSequence.new({
+           ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 40, 40)), -- lighter dark red
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 110, 110)), -- brighter top
+        })
+    )
+
+    -- =========================
+    -- POSTURE BAR
+    -- =========================
+    local postureBg = Instance.new("Frame")
+    postureBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    postureBg.BackgroundTransparency = 0.1
+    postureBg.BorderSizePixel = 0
+    postureBg.Size = UDim2.new(0.1, 0, 1, 0)
+    postureBg.Position = UDim2.new(0.75, 0, 0, 0)
+    postureBg.Visible = false
+    postureBg.Parent = billboard
+
+    local postureFill = Instance.new("Frame")
+    postureFill.AnchorPoint = Vector2.new(0, 1)
+    postureFill.Position = UDim2.new(0, 0, 1, 0)
+    postureFill.Size = UDim2.new(1, 0, 1, 0)
+    postureFill.BorderSizePixel = 0
+    postureFill.Parent = postureBg
+
+    StyleBar(
+        postureBg,
+        postureFill,
+        ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 90, 0)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 215, 0)),
+        })
+    )
+
+    -- =========================
+    -- CONNECTIONS
+    -- =========================
+
+    humanoid.HealthChanged:Connect(function()
+        UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
+    end)
+    UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
+
+    local lifeforce = character:FindFirstChild("Lifeforce", true)
+    if lifeforce then
+        lifeBg.Visible = true
+        lifeforce.Changed:Connect(function()
+            UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
+        end)
+        UpdateBar(lifeFill, lifeforce.Value, lifeforce.MaxValue)
+    end
+
+    local posture = character:FindFirstChild("Posture", true)
+    if posture then
+        postureBg.Visible = true
+        posture.Changed:Connect(function()
+            UpdateBar(postureFill, posture.Value, posture.MaxValue)
+        end)
+        UpdateBar(postureFill, posture.Value, posture.MaxValue)
+    end
+end
+
+
+-- ======================================================================
+-- [RANGE VISUALIZER] (Directional + only shows when enemy is facing you)
+-- ======================================================================
+local RangeVisual = {}
+
+local function GetLocalRoot()
+    local myChar = LocalPlayer.Character
+    if not myChar then return nil end
+    return GetRoot(myChar)
+end
+
+local function IsFacingLocalPlayer(enemyChar)
+    local myRoot = GetLocalRoot()
+    if not myRoot then return false end
+    return IsFacing(enemyChar, myRoot.Position)
+end
+
+function RangeVisual:Create(char, color, range)
+    local root = GetRoot(char)
+    if not root then return nil end
+
+    -- Holder folder so we can destroy cleanly
+    local folder = Instance.new("Folder")
+    folder.Name = "AnimRangeVisualFolder"
+    folder.Parent = Workspace
+
+    -- Range circle (cylinder)
+    local ring = Instance.new("Part")
+    ring.Name = "AnimRangeRing"
+    ring.Anchored = true
+    ring.CanCollide = false
+    ring.CanQuery = false
+    ring.CanTouch = false
+    ring.Material = Enum.Material.Neon
+    ring.Color = color
+    ring.Transparency = 0.9
+    ring.Shape = Enum.PartType.Cylinder
+    ring.Size = Vector3.new(0.15, (range * 2), (range * 2))
+    ring.Parent = folder
+
+    -- Direction arrow (thin rectangle pointing forward)
+    local arrow = Instance.new("Part")
+    arrow.Name = "AnimRangeArrow"
+    arrow.Anchored = true
+    arrow.CanCollide = false
+    arrow.CanQuery = false
+    arrow.CanTouch = false
+    arrow.Material = Enum.Material.Neon
+    arrow.Color = color
+    arrow.Transparency = 0.15
+    arrow.Size = Vector3.new(range, 0.18, 0.6) -- length = range
+    arrow.Parent = folder
+
+    -- Make arrow rounded-ish
+    local arrowCorner = Instance.new("UICorner")
+    arrowCorner.CornerRadius = UDim.new(0.25, 0)
+    arrowCorner.Parent = arrow
+
+    return {
+        Folder = folder,
+        Ring = ring,
+        Arrow = arrow,
+    }
+end
+
+function RangeVisual:BindToTrack(char, track, color, range)
+    local root = GetRoot(char)
+    if not root or not track then return end
+
+    local vis = self:Create(char, color, range)
+    if not vis then return end
+
+    local hbConn
+    hbConn = RunService.Heartbeat:Connect(function()
+        if not track.IsPlaying or not root.Parent then
+            if hbConn then hbConn:Disconnect() end
+            if vis and vis.Folder then vis.Folder:Destroy() end
+            return
+        end
+
+        local pos = root.Position
+        local y = pos.Y - 2.5
+
+        -- Only show when they're facing the LocalPlayer
+        local show = IsFacingLocalPlayer(char)
+
+        -- Update ring position (flat on ground)
+        vis.Ring.Transparency = show and 0.9 or 1
+        vis.Ring.CFrame = CFrame.new(Vector3.new(pos.X, y, pos.Z)) * CFrame.Angles(0, 0, math.rad(90))
+
+        -- Update arrow orientation (points where HRP is looking on XZ plane)
+        -- Flatten lookvector so it doesn't tilt up/down
+        local look = root.CFrame.LookVector
+        local flatLook = Vector3.new(look.X, 0, look.Z)
+        if flatLook.Magnitude < 0.01 then
+            flatLook = Vector3.new(0, 0, -1)
+        else
+            flatLook = flatLook.Unit
+        end
+
+        -- Place arrow so it starts near center and extends forward
+        local base = Vector3.new(pos.X, y + 0.05, pos.Z)
+        local forwardCenter = base + flatLook * (range * 0.5)
+
+        vis.Arrow.Transparency = show and 0.15 or 1
+        vis.Arrow.CFrame = CFrame.lookAt(forwardCenter, forwardCenter + flatLook)
+    end)
+
+    track.Stopped:Connect(function()
+        if hbConn then hbConn:Disconnect() end
+        if vis and vis.Folder then vis.Folder:Destroy() end
+    end)
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.2)
+
+        if not getgenv().DemonAutoFarmEnabled then
+            continue
+        end
+
+        -- [[ SINGLE EXECUTION CHECK ]] --
+if getgenv().SpeedHubXLoaded then 
+    return 
+end
+
+getgenv().SpeedHubXLoaded = true -- Set the flag so future executions fail
+-- Print a message to the console for troubleshooting
+
+-- Load and execute the script
+local success, err = pcall(function()
+    local Players = game:GetService("Players")
+    local TweenService = game:GetService("TweenService")
+    local RunService = game:GetService("RunService")
+    local UserInputService = game:GetService("UserInputService")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local VirtualInputManager = game:GetService("VirtualInputManager")
+
+    local player = Players.LocalPlayer
+
+    -- [[ SCRIPT CONTROL ]] --
+    local scriptActive = true -- Global flag to control termination
+
+    -- ===== SETTINGS =====
+    local LIVE_FOLDER = workspace:WaitForChild("Live")
+    local NPC_PREFIX = "NPC_"
+
+    -- Combat (hover/lock)
+    local COMBAT_HEIGHT = -9
+    local COMBAT_BACK_OFFSET = 0
+    local COMBAT_TWEEN_TIME = 0.07
+
+    -- E equip control
+    local ePressedEver = false
+    local lastEPress = 0
+
+    -- LeftAlt spam control
+    local lastLeftAltPress = 0
+
+    -- BlueFlower: press A once after FIRST teleport ever
+    local pressedAAfterFirstBlueFlowerTeleport = false
+
+    -- Spam rates (ONLY during combat lock)
+    local CLICK_SPEED = 0.1
+    local W_SPAM_SPEED = 0.08
+
+    -- Fixed click positions
+    local function getDemonClickXY()
+    local x = tonumber(getgenv().DemonClickX) or 771
+    local y = tonumber(getgenv().DemonClickY) or 650
+    return x, y
+end
+
+
+    local VE_TOP_X, VE_TOP_Y = 1889, 50
+    local EMPTY_LIVE_X, EMPTY_LIVE_Y = 900, 629
+
+    -- Intervals
+    local VILLAGER_ESCORT_INTERVAL = 3
+
+    -- V + click routine timings
+    local WAIT_BEFORE_V = 5
+    local WAIT_AFTER_CLICK = 16-- hard loop every 10 seconds
+
+    -- ===== STATE =====
+    local enabled = true
+    local lockConn: RBXScriptConnection? = nil
+    local inCombatLock = false
+
+    -- Auto-pause when no valid target NPCs exist (combat finished)
+    local autoPaused = false
+    local autoPauseReason = ""
+
+    local function isRunning(): boolean
+        return enabled and (not autoPaused) and scriptActive
+    end
+
+    local function setAutoPaused(state: boolean, reason: string?)
+        if autoPaused == state then return end
+        autoPaused = state
+        autoPauseReason = state and (reason or "AutoPaused") or ""
+        if autoPaused then
+        else
+        end
+    end
+
+    local currentCombatNPC: Model? = nil
+
+    -- ===== CHARACTER =====
+    local LOADING_PLACE_ID = 11641576792
+
+    local function getCharacter()
+        -- loading/menu place → no character exists
+        if game.PlaceId == LOADING_PLACE_ID then
+            return nil, nil, nil
+        end
+
+        local character = player.Character or player.CharacterAdded:Wait()
+        local humanoid = character:WaitForChild("Humanoid")
+        local hrp = character:WaitForChild("HumanoidRootPart")
+
+        return character, humanoid, hrp
+    end
+
+    local character, humanoid, hrp
+
+    if game.PlaceId ~= LOADING_PLACE_ID then
+        character, humanoid, hrp = getCharacter()
+    end
+
+    player.CharacterAdded:Connect(function(char)
+        task.defer(function()
+            local h = char:WaitForChild("Humanoid")
+            local r = char:WaitForChild("HumanoidRootPart")
+            character, humanoid, hrp = char, h, r
+        end)
+    end)
+
+    local function getModelPart(model: Model): BasePart?
+        if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+            return model.PrimaryPart
+        end
+        for _, d in ipairs(model:GetDescendants()) do
+            if d:IsA("BasePart") then
+                return d
+            end
+        end
+        return nil
+    end
+
+    -- ===== Movement control =====
+    local function stopLock()
+        if lockConn then
+            lockConn:Disconnect()
+            lockConn = nil
+        end
+        if inCombatLock then
+            inCombatLock = false
+        end
+    end
+
+    local function setMovementLocked(isLocked: boolean)
+        if not humanoid then return end
+        if isLocked then
+            humanoid.PlatformStand = true
+            humanoid.AutoRotate = false
+        else
+            humanoid.PlatformStand = false
+            humanoid.AutoRotate = true
+        end
+    end
+
+    -- ===== Virtual input helpers =====
+    local function VirtualPressKey(keyCode: Enum.KeyCode, pressTime: number?)
+        pressTime = pressTime or 0.04
+        VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+        task.wait(pressTime)
+        VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+    end
+
+    local function VirtualClickAt(x: number, y: number)
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+        task.wait()
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    end
+
+	local function VirtualClickAtScaled(x, y, baseW, baseH)
+    baseW = baseW or 1920
+    baseH = baseH or 1080
+
+    local cam = workspace.CurrentCamera
+    if not cam then
+        return VirtualClickAt(x, y)
+    end
+
+    local vp = cam.ViewportSize
+    local sx = math.floor((x / baseW) * vp.X)
+    local sy = math.floor((y / baseH) * vp.Y)
+
+    VirtualClickAt(sx, sy)
+end
+
+
+    local function VirtualClickAtMouse()
+        local mouseLocation = UserInputService:GetMouseLocation()
+        VirtualInputManager:SendMouseButtonEvent(mouseLocation.X, mouseLocation.Y, 0, true, game, 0)
+        task.wait()
+        VirtualInputManager:SendMouseButtonEvent(mouseLocation.X, mouseLocation.Y, 0, false, game, 0)
+    end
+
+    -- ===== Missions =====
+    local function HasMissionsFolder(): boolean
+        return ReplicatedStorage:FindFirstChild("missions") ~= nil
+    end
+
+    local function getMissionNameStringValue(): StringValue?
+        local missions = ReplicatedStorage:FindFirstChild("missions")
+        if not missions then
+            return nil
+        end
+        for _, d in ipairs(missions:GetDescendants()) do
+            if d:IsA("StringValue") and d.Name == "name" then
+                return d
+            end
+        end
+        return nil
+    end
+
+    local function getMissionName(): string
+        local sv = getMissionNameStringValue()
+        return sv and sv.Value or ""
+    end
+
+    -- ===== NPC helpers =====
+    local function getNPCPrimaryPart(model: Model): BasePart?
+        if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+            return model.PrimaryPart
+        end
+        local hrp2 = model:FindFirstChild("HumanoidRootPart")
+        if hrp2 and hrp2:IsA("BasePart") then
+            return hrp2
+        end
+        for _, d in ipairs(model:GetDescendants()) do
+            if d:IsA("BasePart") then
+                return d
+            end
+        end
+        return nil
+    end
+
+    local function isNPCModel(inst: Instance): boolean
+        return inst
+            and inst:IsA("Model")
+            and inst.Name:sub(1, #NPC_PREFIX) == NPC_PREFIX
+            and inst:IsDescendantOf(LIVE_FOLDER)
+    end
+
+    -- UPDATED: Logic to find the CLOSEST valid target based on quest name
+    -- UPDATED: Logic to find the CLOSEST valid target based on quest name
+   -- UPDATED: Logic to find the CLOSEST valid target based on quest name
+    local function findTargetNPC(): Model?
+        local missionName = getMissionName()
+        
+        -- [[ "At Ease Soldier! Soldier!" CHECK ]] --
+        if missionName == "At Ease Soldier! Soldier!" then return nil end
+
+        local originPos = hrp and hrp.Position
+        
+        if missionName == "Village Wipeout" then
+            local marker = workspace:FindFirstChild("missionMarker")
+            if marker then
+                originPos = marker.Position
+            end
+        end
+
+        if not originPos then return nil end
+
+        local closestNPC = nil
+        local closestDist = math.huge
+
+        for _, m in ipairs(LIVE_FOLDER:GetChildren()) do
+            if isNPCModel(m) then
+                -- [[ 1. GLOBAL FILTERS ]] --
+                local hum = m:FindFirstChild("Humanoid")
+                if not hum or hum.Health <= 0 then continue end
+                if m:GetAttribute("STATIC_NPC") == true then continue end
+                local con = m:GetAttribute("Constitution")
+                if con and con == 0 then continue end
+                if m:GetAttribute("NoTarget") ~= nil then continue end
+
+                -- [[ 2. ATTRIBUTE RETRIEVAL ]] --
+                local npcNameAttr = m:GetAttribute("NPCName")
+                local isCivilian = (npcNameAttr == "Civilian")
+                local isSlayerRecruit = (npcNameAttr == "Slayer Recruit")
+                local hasBreath = m:GetAttribute("Breath") ~= nil
+                local intelligence = m:GetAttribute("Intelligence") or 0
+                local lvl = m:GetAttribute("LVL") or 0 
+
+                local isValidTarget = false
+
+                -- [[ 3. MISSION LOGIC ]] --
+                if missionName == "Guards Alerted" or missionName == "Mizunoe Wipeout" then
+                    -- Target if: Non-Civilian AND (Level 11+ OR Slayer Recruit OR Has Breath)
+                    if not isCivilian then
+                        if (lvl >= 11) or isSlayerRecruit or hasBreath then
+                            isValidTarget = true
+                        end
+                    end
+
+                elseif missionName == "Village Wipeout" then
+                    -- Target: Civilian AND LVL 10 or under
+                    if isCivilian and (lvl <= 10) then
+                        isValidTarget = true
+                    end
+
+                else 
+                    -- Default Behavior (Fallback for generic extermination)
+                    if (not isCivilian) and (intelligence < 3) then
+                        isValidTarget = true
+                    end
+                end
+
+                -- [[ 4. DISTANCE CALCULATION ]] --
+                if isValidTarget then
+                    local primary = getNPCPrimaryPart(m)
+                    if primary then
+                        local dist = (primary.Position - originPos).Magnitude
+                        if dist < closestDist then
+                            closestDist = dist
+                            closestNPC = m
+                        end
+                    end
+                end
+            end
+        end
+        return closestNPC
+    end
+
+    -- ===== CFrame positioning (combat hover) =====
+    local function computeHoverCFrame(npcPart: BasePart, height: number, backOffset: number): CFrame
+        local base = npcPart.CFrame
+        local pos = base.Position + base.UpVector * height + base.LookVector * backOffset
+        return CFrame.lookAt(pos, npcPart.Position)
+    end
+
+    local function tweenHRPTo(targetCF: CFrame, tweenTime: number)
+        if not hrp or not hrp.Parent then return end
+        local t = TweenService:Create(
+            hrp,
+            TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { CFrame = targetCF }
+        )
+        t:Play()
+        t.Completed:Wait()
+    end
+
+    -- ===== WeaponData detection (LATCH) =====
+    -- ===== WEAPONDATA & REMOTE LOGIC =====
+    
+    -- Checks specifically if WeaponData is inside the LocalPlayer model in Live
+    local function weaponDataExists(): boolean
+        local liveLP = LIVE_FOLDER:FindFirstChild(player.Name) or LIVE_FOLDER:FindFirstChild("LocalPlayer")
+        if liveLP and liveLP:FindFirstChild("WeaponData") then
+            return true
+        end
+        return false
+    end
+
+    -- Direct Remote Fire Function with 'true' argument
+    local function fireCombatRemote()
+        local tool = player.Backpack:FindFirstChild("Combat") or (player.Character and player.Character:FindFirstChild("Combat"))
+        if tool then
+            local remote = tool:FindFirstChild("ToggleEquip")
+            if remote and remote:IsA("RemoteEvent") then
+                remote:FireServer(true)
+            end
+        end
+    end
+
+    -- Dedicated Equip Loop: Fires every 5 seconds
+    task.spawn(function()
+        while scriptActive do
+            -- Only fire if enabled, not "At ease", and WeaponData is missing
+            if enabled and getMissionName() ~= "At ease" and getMissionName() ~= "" then
+                if not weaponDataExists() then
+                    fireCombatRemote()
+                    -- print("WeaponData missing: Fired ToggleEquip(true)")
+                end
+            end
+            task.wait(5)
+        end
+    end)
+
+    -- ===== Toggle (Y) AND Terminate (X) =====
+    local inputConnection
+    inputConnection = UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        
+        -- [[ TERMINATE ON X ]] --
+        -- [[ TERMINATE ON X ]] --
+        if input.KeyCode == Enum.KeyCode.X then
+            scriptActive = false -- Kill global flag
+            getgenv().SpeedHubXLoaded = nil -- Clear the execution flag
+            enabled = false
+            currentCombatNPC = nil
+            stopLock()
+            setMovementLocked(false)
+            if inputConnection then inputConnection:Disconnect() end
+            return
+        end
+
+        -- [[ TOGGLE ON Y ]] --
+        if input.KeyCode == Enum.KeyCode.Y then
+            if not scriptActive then return end -- Don't toggle if terminated
+            enabled = not enabled
+
+            if not enabled then
+                currentCombatNPC = nil
+                stopLock()
+                setMovementLocked(false)
+            end
+        end
+    end)
+-- ===== LeftAlt spam loop =====
+    task.spawn(function()
+        while scriptActive do 
+            task.wait(0.05)
+            -- Check for "At Ease Soldier! Soldier!" OR no mission at all
+            if not enabled or getMissionName() == "At Ease Soldier! Soldier!" or getMissionName() == "" then continue end
+            local now = os.clock()
+            if (now - lastLeftAltPress) >= 0.6 then
+                lastLeftAltPress = now
+                VirtualPressKey(Enum.KeyCode.LeftAlt, 0.05)
+            end
+        end
+    end)
+
+    -- ===== PlaceId/GameId-based spam click =====
+    local TARGET_ID = 11641576792
+    task.spawn(function()
+        if not game:IsLoaded() then
+            game.Loaded:Wait()
+        end
+        task.wait(1)
+        while scriptActive do 
+            -- No action if disabled, "At Ease Soldier! Soldier!", or no mission folder/name
+            if not enabled or getMissionName() == "At Ease Soldier! Soldier!" or getMissionName() == "" or not HasMissionsFolder() then
+                task.wait(0.2)
+                continue
+            end
+            local placeMatch = (game.PlaceId == TARGET_ID)
+            local gameMatch = (game.GameId == TARGET_ID)
+
+            if placeMatch or gameMatch then
+                VirtualClickAt(EMPTY_LIVE_X, EMPTY_LIVE_Y)
+                task.wait(0.15)
+            else
+                task.wait(0.5)
+            end
+        end
+    end)
+
+    -- ===== Villager Escort =====
+    task.spawn(function()
+        while scriptActive do 
+            task.wait(0.2)
+            -- No action if disabled, "At Ease Soldier! Soldier!", or no mission folder/name
+            if not enabled or getMissionName() == "At Ease Soldier! Soldier!" or getMissionName() == "" or not HasMissionsFolder() then continue end
+
+            local missionName = getMissionName()
+            if missionName == "Villager Escort" then
+                if not inCombatLock then
+                    VirtualClickAt(VE_TOP_X, VE_TOP_Y)
+                    task.wait(0.2)
+                    VirtualClickAt(CLICK_X, 605)
+                end
+                task.wait(VILLAGER_ESCORT_INTERVAL)
+            end
+        end
+    end)
+
+    -- ===== Number key spam (7–8) =====
+    task.spawn(function()
+        local KEY_SPAM_DELAY = 0.12
+        local numberKeys = { Enum.KeyCode.Seven, Enum.KeyCode.Eight }
+
+        while scriptActive do 
+            task.wait(KEY_SPAM_DELAY)
+            -- No action if disabled, "At Ease Soldier! Soldier!", or no mission folder/name
+            if not enabled or not inCombatLock or getMissionName() == "At Ease Soldier! Soldier!" or getMissionName() == "" then continue end
+
+            for _, key in ipairs(numberKeys) do
+                if not inCombatLock or not enabled or not scriptActive then break end
+                VirtualPressKey(key, 0.03)
+                task.wait(0.02)
+            end
+        end
+    end)
+
+    -- ===== Medicine Retrival =====
+    task.spawn(function()
+        local CLICK_INTERVAL = 0.08
+        local PER_FLOWER_TIMEOUT = 20
+        local SPAM_X, SPAM_Y = 961, 767
+
+        while scriptActive do 
+            task.wait(0.2)
+            -- No action if disabled, "At Ease Soldier! Soldier!", or no mission folder/name
+            if not enabled or getMissionName() == "At Ease Soldier! Soldier!" or getMissionName() == "" or not HasMissionsFolder() then continue end
+
+            if getMissionName() ~= "Medicine Retrival" then continue end
+
+            if not hrp or not hrp.Parent then
+                if game.PlaceId ~= LOADING_PLACE_ID then
+                    character, humanoid, hrp = getCharacter()
+                end
+                if not hrp then continue end
+            end
+
+            local thrown = workspace:FindFirstChild("Thrown")
+            if not thrown then continue end
+
+            if inCombatLock then
+                stopLock()
+                setMovementLocked(false)
+            end
+
+            local target: Model? = nil
+            for _, m in ipairs(thrown:GetChildren()) do
+                if m:IsA("Model") and m.Name == "BlueFlower" then
+                    target = m
+                    break
+                end
+            end
+
+            if not target then continue end
+            local part = getModelPart(target)
+            if not part then continue end
+
+            do
+                local standPos = part.Position + Vector3.new(0, 2, 0) + (part.CFrame.LookVector * -2)
+                local faceCF = CFrame.lookAt(standPos, part.Position)
+                tweenHRPTo(faceCF, 0.12)
+
+                if not pressedAAfterFirstBlueFlowerTeleport then
+                    pressedAAfterFirstBlueFlowerTeleport = true
+                    VirtualPressKey(Enum.KeyCode.A, 0.12)
+                end
+            end
+
+            local startT = os.clock()
+            while scriptActive and enabled and HasMissionsFolder() and getMissionName() == "Medicine Retrival" 
+                  and hrp and hrp.Parent and target.Parent == thrown and part and part.Parent 
+                  and (os.clock() - startT) < PER_FLOWER_TIMEOUT do
+                VirtualClickAt(SPAM_X, SPAM_Y)
+                task.wait(CLICK_INTERVAL)
+            end
+        end
+    end)
+
+    -- ===== Combat spam loop =====
+    task.spawn(function()
+        local lastClick = 0
+        local lastW = 0
+        while scriptActive do 
+            task.wait(0.01)
+            -- No action if disabled, "At Ease Soldier! Soldier!", or no mission folder/name
+            if not enabled or not inCombatLock or getMissionName() == "At Ease Soldier! Soldier!" or getMissionName() == "" then continue end
+
+            local now = os.clock()
+            if (now - lastW) >= W_SPAM_SPEED then
+                lastW = now
+                VirtualPressKey(Enum.KeyCode.W, 0.03)
+            end
+
+            if (now - lastClick) >= CLICK_SPEED then
+                lastClick = now
+                VirtualClickAtMouse()
+            end
+        end
+    end)
+
+
+    -- ===== SIMPLE V LOOP (PLACE ID ONLY + DEBUG) =====
+task.spawn(function()
+    local TARGET_PLACE_ID = 14220582083
+    local V_COOLDOWN = 6
+    local lastFire = 0
+
+    local lastDebug = 0
+    local DEBUG_INTERVAL = 2 -- seconds
+
+
+    while scriptActive do
+        task.wait(0.1)
+
+        local now = os.clock()
+
+        -- ---- DEBUG HEARTBEAT ----
+    
+
+        -- ---- HARD GATES ----
+        if not enabled then
+            --print("[V LOOP] Skipped: script disabled")
+            continue
+        end
+
+        if game.PlaceId ~= TARGET_PLACE_ID then
+            --print("[V LOOP] Skipped: wrong place")
+            continue
+        end
+
+        -- ---- COOLDOWN CHECK ----
+        if (now - lastFire) < V_COOLDOWN then
+            --print("[V LOOP] Skipped: cooldown")
+            continue
+        end
+
+        -- ---- FIRE ----
+        lastFire = now
+
+        VirtualPressKey(Enum.KeyCode.V, 0.05)
+        task.wait(0.15)
+
+        local cx, cy = getDemonClickXY()
+        VirtualClickAtScaled(cx, cy)
+
+    end
+
+end)
+
+   -- ===== Main loop (Combat hover lock) =====
+    task.spawn(function()
+        while scriptActive do 
+            task.wait(0.12)
+            if not enabled then continue end
+
+            if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+                character, humanoid, hrp = getCharacter()
+            end
+
+            -- Ensure we stop if the folder is missing or "At Ease" mission is active
+            local missionName = HasMissionsFolder() and getMissionName() or ""
+            if missionName == "" or missionName == "At Ease Soldier! Soldier!" then
+                stopLock()
+                setMovementLocked(false)
+                currentCombatNPC = nil
+                continue
+            end
+
+            -- List of missions where we want combat behavior
+            local isCombatMission = (missionName == "Extermination" or missionName == "Mizunoe Wipeout" or missionName == "Village Wipeout" or missionName == "Guards Alerted")
+
+            if isCombatMission then
+                
+                -- [[ FAST SWITCH: If current target is dead, clear it immediately ]] --
+                if currentCombatNPC then
+                    local hum = currentCombatNPC:FindFirstChild("Humanoid")
+                    if not hum or hum.Health <= 0 then
+                        currentCombatNPC = nil
+                    end
+                end
+
+                -- Use the new finding logic
+                local targetNPC = findTargetNPC()
+
+                if not targetNPC then
+                    stopLock()
+                    setMovementLocked(false)
+                    currentCombatNPC = nil
+                    continue
+                end
+
+                -- Ensure we stick to the target until it's dead or invalid
+                if not currentCombatNPC 
+                   or not currentCombatNPC:IsDescendantOf(LIVE_FOLDER) then
+                     currentCombatNPC = targetNPC
+                else
+                    -- Verify current target is still valid for this specific mission type
+                    local intelligence = currentCombatNPC:GetAttribute("Intelligence")
+                    local npcName = currentCombatNPC:GetAttribute("NPCName")
+                    
+                    if not intelligence or intelligence >= 3 then
+                         currentCombatNPC = targetNPC 
+                    elseif missionName == "Village Wipeout" and npcName ~= "Civilian" then
+                         currentCombatNPC = targetNPC
+                    elseif (missionName == "Mizunoe Wipeout" or missionName == "Extermination") and npcName == "Civilian" then
+                         currentCombatNPC = targetNPC
+                    end
+                end
+
+                local npcPart = currentCombatNPC and getNPCPrimaryPart(currentCombatNPC)
+                if not npcPart then
+                    currentCombatNPC = nil
+                    continue
+                end
+
+                setMovementLocked(true)
+                tweenHRPTo(computeHoverCFrame(npcPart, COMBAT_HEIGHT, COMBAT_BACK_OFFSET), COMBAT_TWEEN_TIME)
+                stopLock()
+                inCombatLock = true
+
+                if not ePressedEver then
+                    if weaponDataExists() then
+                        ePressedEver = true
+                    else
+                        local now = os.clock()
+                        if (now - lastEPress) >= 1 then
+                            lastEPress = now
+                            VirtualPressKey(Enum.KeyCode.E, 0.05)
+                        end
+                    end
+                end
+
+                lockConn = RunService.RenderStepped:Connect(function()
+                    if not enabled then return end
+                    
+                    -- [[ INSTANT DEATH CHECK ]] --
+                    if currentCombatNPC then
+                        local h = currentCombatNPC:FindFirstChild("Humanoid")
+                        if h and h.Health <= 0 then
+                            currentCombatNPC = nil -- Drop target instantly
+                            return
+                        end
+                    end
+
+                    if not currentCombatNPC or not currentCombatNPC:IsDescendantOf(LIVE_FOLDER) then return end
+                    
+                    local partNow = getNPCPrimaryPart(currentCombatNPC)
+                    if partNow and hrp then
+                        hrp.CFrame = computeHoverCFrame(partNow, COMBAT_HEIGHT, COMBAT_BACK_OFFSET)
+                        hrp.AssemblyLinearVelocity = Vector3.zero
+                        hrp.AssemblyAngularVelocity = Vector3.zero
+                    end
+                end)
+                continue
+            end
+
+            stopLock()
+            setMovementLocked(false)
+            currentCombatNPC = nil
+        end
+    end)
+end)
+
+if success then
+else
+end
+    end
+end)
+
+
+-- ==============================================================================
+-- [PARRY CORE - MONITOR] (ONLY REACT IF THEY'RE FACING YOU)
+-- ==============================================================================
+local function MonitorAndBlock(track, char, animId, animName, settings)
+    -- Name Resolution
+    if (not animName) or animName == "" or animName == "Animation" or animName == "Animation1" then
+        animName = Config.SkillAnimIdToName[tostring(animId)]
+            or (settings.Type .. " (" .. tostring(animId):match("%d+") .. ")")
+    end
+
+    local triggerPct = settings.ReactionPct
+    local range = settings.Range
+
+    -- Ping Compensation
+    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+    local pingNumber = tonumber(ping:match("%d+")) or 50
+    local pingOffset = (pingNumber / 1000) * 8
+    triggerPct = math.clamp(triggerPct - pingOffset, 1, 99)
+
+    -- Visuals
+    if Config.ESPEnabled and settings.Color and range then
+        RangeVisual:BindToTrack(char, track, settings.Color, range)
+    end
+
+    -- State
+    local isFeinted = false
+    local connections = {}
+
+    -- Specific Ignore Color (Hyperarmor/Orange)
+    local ignoreColor = Color3.fromRGB(255, 150, 30)
+
+    -- [[ 1. DETECT ANIMATION STOP (Standard Feint) ]]
+    table.insert(connections, track.Stopped:Connect(function()
+        isFeinted = true
+    end))
+
+    -- [[ 2. DETECT NEW HIGHLIGHT (Visual Feint) ]]
+    table.insert(connections, char.ChildAdded:Connect(function(child)
+        if child:IsA("Highlight") then
+            if child.Name == "ParryHub_HL" or child:GetAttribute("ParryHubOwned") then return end
+            if child.FillColor == ignoreColor then return end
+            isFeinted = true
+        end
+    end))
+
+    while track.IsPlaying do
+        if not Config.ParryEnabled then break end
+        if isFeinted then break end
+
+        local myChar = LocalPlayer.Character
+        if not myChar then break end
+
+        local myRoot = GetRoot(myChar)
+        local enemyRoot = GetRoot(char)
+        if not myRoot or not enemyRoot then break end
+
+        local length = track.Length
+        local pos = track.TimePosition
+        local percent = 0
+        if length > 0 then percent = (pos / length) * 100 end
+        if percent >= 98 then break end
+
+        local dist = (enemyRoot.Position - myRoot.Position).Magnitude
+
+        -- ✅ NEW: ALWAYS require facing (no more distance-based facing requirement)
+        local facing = IsFacing(char, myRoot.Position)
+        if not facing then
+            RunService.Heartbeat:Wait()
+            continue
+        end
+
+        -- [[ TRIGGER LOGIC ]]
+        if dist <= range and percent >= triggerPct then
+            if not Config.ParryEnabled then break end
+            if not track.IsPlaying or isFeinted then break end
+            if IsPlayerBusyCombatAnim() then break end
+
+            -- BLOCK ACTION
+            BlockRemote:FireServer()
+
+            LastParryAnimId = tostring(animId)
+            LastParryUsedPct = triggerPct
+            LastParryAnimName = animName
+
+            LastParryTime = tick()
+            LastSkillParried = Config.SkillAnimIdToName[tostring(animId)] or animName or "Unknown"
+
+            -- Spawn Visual Effect
+            task.spawn(function()
+                local hl = Instance.new("Highlight")
+                hl.Name = "ParryHub_HL"
+                hl:SetAttribute("ParryHubOwned", true)
+                hl.FillColor = settings.Color
+                hl.OutlineTransparency = 1
+                hl.Parent = char
+                Debris:AddItem(hl, 0.3)
+            end)
+
+            break
+        end
+
+        RunService.Heartbeat:Wait()
+    end
+
+    -- Cleanup
+    for _, conn in ipairs(connections) do
+        conn:Disconnect()
+    end
+end
+
+
+-- ==============================================================================
+-- [PARRY CORE - ON ANIM PLAYED] (UPDATED)
+-- ==============================================================================
+
+
+local function ShouldIgnoreCombatAnim(name: string?): boolean
+    if not name then return false end
+    local n = tostring(name):lower()
+
+    -- exact-name ignore
+    if Config.CombatIgnoreExact and Config.CombatIgnoreExact[tostring(name)] then
+        return true
+    end
+
+    -- substring ignore
+    if Config.CombatIgnoreWords then
+        for _, w in ipairs(Config.CombatIgnoreWords) do
+            w = tostring(w):lower()
+            if w ~= "" and n:find(w, 1, true) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+local function GetLiveModelByPlayer()
+    local live = Workspace:FindFirstChild("Live")
+    if not live then return nil end
+
+    -- Common patterns: "LocalPlayer" model OR player's name model
+    return live:FindFirstChild("LocalPlayer") or live:FindFirstChild(LocalPlayer.Name)
+end
+
+local function GetMyRace()
+    local m = GetLiveModelByPlayer()
+    local r = m and m:GetAttribute("Race")
+    if r ~= nil and tostring(r) ~= "" then
+        return tostring(r)
+    end
+
+    -- fallback (just in case)
+    local c = LocalPlayer.Character
+    local r2 = c and c:GetAttribute("Race")
+    if r2 ~= nil and tostring(r2) ~= "" then
+        return tostring(r2)
+    end
+
+    return nil
+end
+
+local function ShouldIgnoreSameRace(enemyChar)
+    if not Config.IgnoreSameRace then return false end
+    if not enemyChar then return false end
+
+    local myRace = GetMyRace()
+    if not myRace then return false end
+
+    local enemyRace = enemyChar:GetAttribute("Race")
+    if enemyRace == nil or tostring(enemyRace) == "" then return false end
+
+    return tostring(enemyRace) == myRace
+end
+
+
+
+local function OnAnimationPlayed(char, track)
+    if not Config.ParryEnabled then return end
+
+    local myChar = LocalPlayer.Character
+    if not myChar or char == myChar then return end
+
+     -- ✅ NEW: ignore same-race
+    if ShouldIgnoreSameRace(char) then
+        return
+    end
+
+
+    local myRoot = GetRoot(myChar)
+    local enemyRoot = GetRoot(char)
+    if not myRoot or not enemyRoot then return end
+
+
+
+    if not track.Animation then return end
+
+    local animId = tostring(track.Animation.AnimationId)
+    local catName = Config.ValidAnimationIds[animId]
+    if not catName then return end
+
+    -- Resolve skill name
+    local resolvedSkillName = Config.SkillAnimIdToName[animId]
+
+    local dist = (enemyRoot.Position - myRoot.Position).Magnitude
+    if dist > Config.AwarenessRange then return end
+
+    -- Determine variant
+    local variantKey = GetVariantKey(char)
+    local breathConfig = Config.Breaths[variantKey]
+    local demonData = Config.Demons[variantKey]
+
+    -- Defaults
+    local reaction = 20
+    local range = 12
+    local color = Color3.fromRGB(255, 255, 255)
+
+    -- 1. Baseline (Breath / Demon)
+    if breathConfig then
+        reaction = breathConfig.SkillPct
+        range = breathConfig.Range
+        color = breathConfig.Color
+    elseif demonData then
+        reaction = demonData.ReactionPct or reaction
+        range = demonData.Range or range
+        color = Color3.fromRGB(150, 0, 0)
+    end
+
+    -- Prefer resolved name
+    local rawName = track.Name
+    local cleanName = resolvedSkillName or rawName
+
+    -- 2. Overrides by Category
+    if resolvedSkillName and Config.Skills[resolvedSkillName] then
+        -- Skill-specific override
+        reaction = Config.Skills[resolvedSkillName]
+
+    elseif catName == "Combat" then
+        -- Resolve Combat animation name
+        local combatAnimName =
+            Config.CombatAnimIdToName[animId] or track.Name or "Combat"
+
+        -- Ignore unwanted Combat animations
+        if ShouldIgnoreCombatAnim(combatAnimName) then
+            return
+        end
+
+        if breathConfig then
+            reaction = breathConfig.CombatPct
+            color = Color3.fromRGB(255, 100, 100)
+        elseif demonData then
+            reaction = demonData.ReactionPct or 20
+            range = demonData.Range or range
+            color = Color3.fromRGB(150, 0, 0)
+        else
+            reaction = 20
+            color = Color3.fromRGB(255, 100, 100)
+        end
+
+        cleanName = combatAnimName
+
+    elseif catName == "Skills" or catName == "Breath" then
+        -- Baseline already applied
+
+    elseif catName == "NPC" then
+        local npcAnimName = Config.NPCAnimIdToName[animId]
+
+        -- Only react to Swing 1 / Swing 2
+        if npcAnimName ~= "Swing 1" and npcAnimName ~= "Swing 2" then
+            return
+        end
+
+        reaction = Config.NPC.ReactionPct
+        range = Config.NPC.Range
+        color = Config.NPC.Color
+        cleanName = npcAnimName
+    end
+
+    -- FINAL: per-animation override takes priority over grouped default
+
+
+    do
+    local breathKeyForOverride = GetBreathOnlyVariantKey(char) -- nil if StyleBDA OR no Breath string
+    local ov = GetAnimOverride(animId, breathKeyForOverride)
+    if ov ~= nil then
+        reaction = tonumber(ov) or reaction
+    end
+end
+
+
+    local sessionSettings = {
+        Range = range,
+        ReactionPct = reaction,
+        Color = color,
+        Type = catName
+    }
+
+    
+
+    task.spawn(function()
+        MonitorAndBlock(track, char, animId, cleanName, sessionSettings)
+    end)
+end
+
+
+local function ConnectParry(char)
+    local humanoid = char:WaitForChild("Humanoid", 10)
+    if not humanoid then return end
+    local animator = humanoid:WaitForChild("Animator", 10)
+    if not animator then return end
+
+    animator.AnimationPlayed:Connect(function(track)
+        OnAnimationPlayed(char, track)
+    end)
+end
+
+
+-- ==============================================================================
+-- [INITIALIZATION]
+-- ==============================================================================
+task.spawn(getgenv().LoadValidAnimations)
+
+local function SetupCharacter(char)
+    task.spawn(function() CreateESP(char) end)
+    task.spawn(function() ConnectParry(char) end)
+
+    -- ✅ Only track FAILS on *your* character (health/posture loss)
+    if LocalPlayer and char == LocalPlayer.Character then
+        task.spawn(function() SetupFailureDetection(char) end)
+    end
+end
+
+
+for _, p in pairs(Players:GetPlayers()) do
+    if p.Character then SetupCharacter(p.Character) end
+    p.CharacterAdded:Connect(SetupCharacter)
+end
+
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(SetupCharacter)
+end)
+
+if Config.TargetFolder then
+    for _, child in pairs(Config.TargetFolder:GetChildren()) do
+        SetupCharacter(child)
+    end
+    Config.TargetFolder.ChildAdded:Connect(function(child)
+        task.wait(1)
+        SetupCharacter(child)
+    end)
+end
+
+if hookmetamethod and getnamecallmethod then
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        if method == "FireServer" and self == BlockRemote then
+             -- Logic
+        end
+        return oldNamecall(self, ...)
+    end))
+end
+
+game.Close:Connect(function()
+    SaveManager:Save()
+end)
