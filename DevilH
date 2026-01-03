@@ -270,7 +270,6 @@ end
                 track:Destroy()
             end
             
-            print(" [AutoParry] Reference Lengths Set: Normal="..Config.RefLengths.Normal.."s | Crit="..Config.RefLengths.Critical.."s")
         end
     end)
 
