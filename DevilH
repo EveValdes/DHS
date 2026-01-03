@@ -1,0 +1,1494 @@
+-- ==============================================================================
+-- [0] SAFE LOAD CHECK
+-- ==============================================================================
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+    LocalPlayer = Players.LocalPlayer
+end
+
+-- ==============================================================================
+-- [1] LOAD LIBRARY (SYDE)
+-- ==============================================================================
+local success, syde = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/essencejs/syde/refs/heads/main/source", true))()
+end)
+
+if not success or not syde then
+    syde = loadstring(game:HttpGet("https://raw.githubusercontent.com/1201for/Syde/main/source.lua"))()
+end
+
+if not syde then return warn("Both library links failed.") end
+
+-- ==============================================================================
+-- [2] SERVICES & CONFIG
+-- ==============================================================================
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local Debris = game:GetService("Debris")
+
+-- New Remote Path
+local NetworkRemote = ReplicatedStorage:WaitForChild("Files"):WaitForChild("Framework"):WaitForChild("Network"):WaitForChild("RemoteEvent")
+
+-- [[ CONFIGURATION ]] --
+local Config = {
+    ParryEnabled = true,
+    ESPEnabled = true,
+    
+    -- Detection Settings
+    FacingDot = 0.2,
+    AwarenessRange = 45,
+
+    -- Legacy defaults (kept as fallbacks)
+    ReactionPct = 15,
+    CriticalPct = 15,
+
+-- NEW: per-skill-animation settings (animId -> pct)
+SkillSettings = {},
+
+-- NEW: skill animation lookup (animId -> { Name=..., Path=... })
+SkillAnimationIds = {},
+
+
+
+    -- NEW: per-folder AP settings (folderName -> { NormalPct=..., CriticalPct=... })
+    APSettings = {},
+
+    TargetFolder = Workspace:WaitForChild("World"):WaitForChild("Entities"),
+
+    ValidAnimationIds = {},
+    RefLengths = { Normal = 0.5, Critical = 1.0 }
+}
+
+
+-- ==============================================================================
+-- [3] SAVE MANAGER
+-- ==============================================================================
+local SaveManager = {}
+local FileName = "ZoneDevilHunter.json"
+
+function SaveManager:Save()
+    if not writefile then return end
+    local data = {
+        ParryEnabled = Config.ParryEnabled,
+        ESPEnabled = Config.ESPEnabled,
+        AwarenessRange = Config.AwarenessRange,
+
+        -- legacy defaults
+        ReactionPct = Config.ReactionPct,
+        CriticalPct = Config.CriticalPct,
+
+		SkillSettings = Config.SkillSettings,
+
+        -- NEW
+        APSettings = Config.APSettings
+    }
+    writefile(FileName, HttpService:JSONEncode(data))
+end
+
+
+function SaveManager:Load()
+    if isfile and isfile(FileName) then
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(readfile(FileName))
+        end)
+        if success and result then
+            if result.ParryEnabled ~= nil then Config.ParryEnabled = result.ParryEnabled end
+            if result.ESPEnabled ~= nil then Config.ESPEnabled = result.ESPEnabled end
+            if result.AwarenessRange then Config.AwarenessRange = result.AwarenessRange end
+
+            -- legacy defaults
+            if result.ReactionPct then Config.ReactionPct = result.ReactionPct end
+            if result.CriticalPct then Config.CriticalPct = result.CriticalPct end
+
+			if type(result.SkillSettings) == "table" then
+    Config.SkillSettings = result.SkillSettings
+end
+
+
+            -- NEW
+            if type(result.APSettings) == "table" then
+                Config.APSettings = result.APSettings
+            end
+        end
+    end
+end
+
+
+SaveManager:Load()
+
+--- ==============================================================================
+-- [LOGIC CORE: ANIMATION LOADING & REFERENCE]
+-- ==============================================================================
+getgenv().LoadValidAnimations = function()
+    syde:Notify({ Title = 'System', Content = 'Scanning Combat Animations...', Duration = 3 })
+
+    Config.ValidAnimationIds = {}
+    
+    -- [[ NEW: Reference Lengths ]]
+    Config.RefLengths = {
+        Normal = 0.5,   -- Default fallback
+        Critical = 1.0  -- Default fallback
+    }
+
+    local Files = ReplicatedStorage:WaitForChild("Files")
+    local Anims = Files:WaitForChild("Animations")
+    local HumAnims = Anims:WaitForChild("Humanoid")
+    local CombatAnims = HumAnims:WaitForChild("Combat")
+
+	local SkillsAnims = HumAnims:WaitForChild("Skills")
+
+-- Skill exclude keywords (name-based)
+local SKILL_EXCLUDE = { "Miss", "Victim", "Atacker", "Loop", "End", "Landed", "Charge", "Hit", "Reaction", "Start", "Player", "Start", "Attacker", "Stance" }
+
+local function IsSkillExcluded(name)
+    if not name or name == "" then return true end
+    for _, kw in ipairs(SKILL_EXCLUDE) do
+        if string.find(name, kw) then
+            return true
+        end
+    end
+    return false
+end
+
+
+
+-- Scan all Skills animations (store FULL path + name), settings are per AnimationId
+Config.SkillAnimationIds = {}
+local skillCount = 0
+
+local function GetSkillPath(animObj)
+    -- Builds something like: "FolderA/FolderB/AnimName" from inside Skills
+    local parts = {}
+    local p = animObj
+    while p and p ~= SkillsAnims do
+        table.insert(parts, 1, p.Name)
+        p = p.Parent
+    end
+    return table.concat(parts, "/")
+end
+
+for _, obj in ipairs(SkillsAnims:GetDescendants()) do
+    if obj:IsA("Animation") then
+        local id = tostring(obj.AnimationId)
+        if id ~= "" and not IsSkillExcluded(obj.Name) then
+            Config.SkillAnimationIds[id] = {
+                Name = obj.Name,
+                Path = GetSkillPath(obj) -- supports 3+ folders deep
+            }
+            skillCount += 1
+
+            -- default per-animation pct if missing
+            if Config.SkillSettings[id] == nil then
+                Config.SkillSettings[id] = Config.ReactionPct
+            end
+        end
+    end
+end
+
+
+
+
+
+
+
+	-- [AP] Ensure we have APSettings entries for EVERY folder in Combat
+for _, folder in ipairs(CombatAnims:GetChildren()) do
+    if folder:IsA("Folder") then
+        Config.APSettings[folder.Name] = Config.APSettings[folder.Name] or {
+            NormalPct = Config.ReactionPct,
+            CriticalPct = Config.CriticalPct
+        }
+    end
+end
+
+
+    -- 1. Scan All Combat Animations
+    -- 1. Scan All Combat Animations (store folder + name)
+local count = 0
+for _, obj in ipairs(CombatAnims:GetDescendants()) do
+    if obj:IsA("Animation") then
+        local id = tostring(obj.AnimationId)
+        if id ~= "" then
+            -- find the top-level folder under Combat (e.g. Fist/Sword/etc)
+            local folderName = "Unknown"
+            local p = obj.Parent
+            while p and p ~= CombatAnims do
+                if p.Parent == CombatAnims then
+                    folderName = p.Name
+                    break
+                end
+                p = p.Parent
+            end
+
+            Config.ValidAnimationIds[id] = {
+                Name = obj.Name,
+                Folder = folderName
+            }
+            count += 1
+
+            -- ensure defaults exist for that folder in APSettings
+            Config.APSettings[folderName] = Config.APSettings[folderName] or {
+                NormalPct = Config.ReactionPct,
+                CriticalPct = Config.CriticalPct
+            }
+        end
+    end
+end
+
+
+    -- 2. Measure Reference Animations (Fist)
+    -- We load them briefly on the local humanoid to get accurate .Length properties
+    task.spawn(function()
+        local fistFolder = CombatAnims:FindFirstChild("Fist")
+        local myHum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+        local myAnimator = myHum and myHum:FindFirstChild("Animator")
+
+        if fistFolder and myAnimator then
+            -- Measure Normal (usually Combo1 or M1)
+            local normAnim = fistFolder:FindFirstChild("Combo1") or fistFolder:FindFirstChild("M1")
+            if normAnim then
+                local track = myAnimator:LoadAnimation(normAnim)
+                task.wait()
+                if track.Length > 0 then Config.RefLengths.Normal = track.Length end
+                track:Destroy()
+            end
+
+            -- Measure Critical
+            local critAnim = fistFolder:FindFirstChild("Critical")
+            if critAnim then
+                local track = myAnimator:LoadAnimation(critAnim)
+                task.wait()
+                if track.Length > 0 then Config.RefLengths.Critical = track.Length end
+                track:Destroy()
+            end
+            
+            print(" [AutoParry] Reference Lengths Set: Normal="..Config.RefLengths.Normal.."s | Crit="..Config.RefLengths.Critical.."s")
+        end
+    end)
+
+    syde:Notify({
+        Title = 'Success',
+        Content = 'Loaded ' .. count .. ' IDs. Ref Calibrated.',
+        Duration = 3
+    })
+end
+
+-- ==============================================================================
+-- [HELPERS]
+-- ==============================================================================
+local function GetRoot(char)
+    return char.PrimaryPart or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function IsFacing(char, targetPos)
+    local root = GetRoot(char)
+    if not root then return false end
+    local origin = root.Position
+    local lookVector = root.CFrame.LookVector
+    local direction = (targetPos - origin).Unit
+    return lookVector:Dot(direction) > Config.FacingDot
+end
+
+local function PerformBlock()
+    -- Fire Block
+    local argsBlock = { "Event", { Name = "Block" } }
+    NetworkRemote:FireServer(unpack(argsBlock))
+
+    -- Fire Unblock Immediately (Instant Tap)
+    local argsUnblock = { "Event", { Name = "Unblock" } }
+    NetworkRemote:FireServer(unpack(argsUnblock))
+end
+
+
+local function MonitorSkillAnimation(track, char, animName, animId)
+    local basePct = Config.SkillSettings[animId]
+    if basePct == nil then
+        basePct = Config.ReactionPct
+        Config.SkillSettings[animId] = basePct
+    end
+    basePct = tonumber(basePct) or Config.ReactionPct
+
+    local triggerPct = math.clamp(basePct, 1, 99)
+
+    -- Ping compensation (same as before)
+    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+    local pingNumber = tonumber(ping:match("%d+")) or 50
+    local pingOffset = (pingNumber / 1000) * 8
+    triggerPct = math.clamp(triggerPct - pingOffset, 1, 99)
+
+    local range = Config.AwarenessRange
+
+    while track.IsPlaying do
+        local myChar = LocalPlayer.Character
+        if not myChar then break end
+
+        local myRoot = GetRoot(myChar)
+        local enemyRoot = GetRoot(char)
+        if not myRoot or not enemyRoot then break end
+
+        local length = track.Length
+        local pos = track.TimePosition
+        local percent = 0
+        if length > 0 then percent = (pos / length) * 100 end
+        if percent >= 99 then break end
+
+        local dist = (enemyRoot.Position - myRoot.Position).Magnitude
+        local facing = IsFacing(char, myRoot.Position)
+        local requireFacing = dist > 5
+
+        if dist <= range and (not requireFacing or facing) and percent >= triggerPct then
+            if not track.IsPlaying then break end
+            PerformBlock()
+            break
+        end
+
+        RunService.Heartbeat:Wait()
+    end
+end
+
+
+-- ==============================================================================
+-- [PARRY MONITOR] (DYNAMIC TIMING UPDATE)
+-- ==============================================================================
+local function MonitorAnimation(track, char, animName, folderName)
+    
+    -- 1. Get Base Settings based on Type
+    
+local isCritical = string.find(animName, "Critical")
+
+-- OLD:
+-- local basePct = isCritical and Config.CriticalPct or Config.ReactionPct
+
+-- NEW:
+local ap = Config.APSettings[folderName]
+if type(ap) ~= "table" then
+    ap = { NormalPct = Config.ReactionPct, CriticalPct = Config.CriticalPct }
+    Config.APSettings[folderName] = ap
+end
+
+local basePct = isCritical and (ap.CriticalPct or Config.CriticalPct) or (ap.NormalPct or Config.ReactionPct)
+
+	
+    local refLength = isCritical and Config.RefLengths.Critical or Config.RefLengths.Normal
+    
+    -- 2. Calculate Dynamic Trigger Percentage
+    -- Formula: TargetTime = (BasePct% of ReferenceLength)
+    --          NewPct = (TargetTime / CurrentLength) * 100
+    local currentLength = track.Length
+    if currentLength <= 0 then currentLength = 1 end -- Safety div/0
+
+    local targetTime = (basePct / 100) * refLength
+    local calculatedPct = (targetTime / currentLength) * 100
+    
+    -- Clamp percentage (never below 1% to avoid instant triggers on bugged anims)
+    local triggerPct = math.clamp(calculatedPct, 1, 99)
+
+    -- 3. Ping Compensation
+    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString()
+    local pingNumber = tonumber(ping:match("%d+")) or 50
+    local pingOffset = (pingNumber / 1000) * 8
+    
+    triggerPct = math.clamp(triggerPct - pingOffset, 1, 99)
+
+    -- Debug Print (Optional, remove if spammy)
+    -- print(string.format("Anim: %s | Len: %.2fs | Ref: %.2fs | Pct: %d%% -> Adjusted: %d%%", 
+    --    animName, currentLength, refLength, basePct, triggerPct))
+
+    local range = Config.AwarenessRange
+
+    -- Visual Indicator
+    if Config.ESPEnabled then
+        task.spawn(function()
+            local hl = Instance.new("Highlight")
+            hl.Name = isCritical and "ParryHub_Crit_HL" or "ParryHub_HL"
+            hl.FillColor = isCritical and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 50, 50)
+            hl.OutlineColor = isCritical and Color3.fromRGB(255, 255, 0) or Color3.fromRGB(255, 255, 255)
+            hl.OutlineTransparency = isCritical and 0 or 1
+            hl.Parent = char
+            Debris:AddItem(hl, 0.5)
+        end)
+    end
+
+    while track.IsPlaying do
+        local myChar = LocalPlayer.Character
+        if not myChar then break end
+
+        local myRoot = GetRoot(myChar)
+        local enemyRoot = GetRoot(char)
+        if not myRoot or not enemyRoot then break end
+
+        -- Calculate Progress
+        local length = track.Length
+        local pos = track.TimePosition
+        local percent = 0
+        if length > 0 then percent = (pos / length) * 100 end
+
+        if percent >= 99 then break end -- Anim finished
+
+        -- Checks
+        local dist = (enemyRoot.Position - myRoot.Position).Magnitude
+        local facing = IsFacing(char, myRoot.Position)
+        
+        -- Logic: If close enough AND (facing us OR very close), check percent
+        local requireFacing = dist > 5 
+
+        if dist <= range and (not requireFacing or facing) and percent >= triggerPct then
+            
+            if not track.IsPlaying then break end
+            
+            -- [[ ACTION ]]
+            PerformBlock()
+            break
+        end
+        RunService.Heartbeat:Wait()
+    end
+end
+
+local function OnAnimationPlayed(char, track)
+    if not Config.ParryEnabled then return end
+
+    local myChar = LocalPlayer.Character
+    if not myChar or char == myChar then return end
+    if not track.Animation then return end
+
+    local animId = tostring(track.Animation.AnimationId)
+
+    -- 1) Combat?
+    local meta = Config.ValidAnimationIds[animId]
+    if meta then
+        local animName = meta.Name
+        local folderName = meta.Folder or "Unknown"
+
+        local myRoot = GetRoot(myChar)
+        local enemyRoot = GetRoot(char)
+        if not myRoot or not enemyRoot then return end
+
+        local dist = (enemyRoot.Position - myRoot.Position).Magnitude
+        if dist > Config.AwarenessRange then return end
+
+        task.spawn(function()
+            MonitorAnimation(track, char, animName, folderName)
+        end)
+        return
+    end
+
+    -- 2) Skills?
+    local sMeta = Config.SkillAnimationIds[animId]
+if sMeta then
+    local animName = sMeta.Name
+
+    local myRoot = GetRoot(myChar)
+    local enemyRoot = GetRoot(char)
+    if not myRoot or not enemyRoot then return end
+
+    local dist = (enemyRoot.Position - myRoot.Position).Magnitude
+    if dist > Config.AwarenessRange then return end
+
+    task.spawn(function()
+        MonitorSkillAnimation(track, char, animName, animId)
+    end)
+    return
+end
+end
+
+
+local function ConnectEntity(char)
+    local humanoid = char:WaitForChild("Humanoid", 10)
+    if not humanoid then return end
+    local animator = humanoid:WaitForChild("Animator", 10)
+    if not animator then return end
+
+    animator.AnimationPlayed:Connect(function(track)
+        OnAnimationPlayed(char, track)
+    end)
+end
+
+-- ==============================================================================
+-- [ESP LOGIC] (Script2 behavior + Script1 directions)
+-- Targets:
+--   1) Real player Characters (Players service)
+--   2) Workspace.World.Entities models that contain entity.Player (your “new directions”)
+-- ==============================================================================
+
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+
+-- Script 1 direction
+Config.TargetFolder = Workspace:WaitForChild("World"):WaitForChild("Entities")
+
+-- Optional range gate (set to nil/false to disable)
+Config.ESPMaxDistance = Config.ESPMaxDistance or nil
+
+local function UpdateBar(frame, current, max)
+	max = tonumber(max) or 1
+	if max <= 0 then max = 1 end
+	current = tonumber(current) or 0
+
+	local percent = math.clamp(current / max, 0, 1)
+	TweenService:Create(
+		frame,
+		TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Size = UDim2.new(1, 0, percent, 0) }
+	):Play()
+end
+
+local function StyleBar(bg, fill, gradientColors)
+	local c1 = Instance.new("UICorner")
+	c1.CornerRadius = UDim.new(0.4, 0)
+	c1.Parent = bg
+
+	local c2 = Instance.new("UICorner")
+	c2.CornerRadius = UDim.new(0.4, 0)
+	c2.Parent = fill
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(0, 0, 0)
+	stroke.Thickness = 1
+	stroke.Transparency = 0.4
+	stroke.Parent = bg
+
+	local grad = Instance.new("UIGradient")
+	grad.Rotation = 90
+	grad.Color = gradientColors
+	grad.Parent = fill
+end
+
+local function GetAnyRootPart(model)
+	if not model or not model:IsA("Model") then return nil end
+	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then return model.PrimaryPart end
+	local hrp = model:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then return hrp end
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then return d end
+	end
+	return nil
+end
+
+local function GetMyHRP()
+	local ch = LocalPlayer and LocalPlayer.Character
+	return ch and ch:FindFirstChild("HumanoidRootPart")
+end
+
+-- ✅ unified resolver:
+-- - If it's an entity wrapper in World.Entities, use entity.Player
+-- - Otherwise assume it's a normal character model
+local function ResolveESPModel(model)
+	if not model or not model:IsA("Model") then return nil end
+
+	local rig = model
+	local maybePlayerRig = model:FindFirstChild("Player")
+	if maybePlayerRig and maybePlayerRig:IsA("Model") then
+		rig = maybePlayerRig
+	end
+
+	local root = GetAnyRootPart(rig)
+	local hum = rig:FindFirstChildOfClass("Humanoid") or rig:FindFirstChild("Humanoid")
+
+	-- Posture exists only in your World.Entities player rigs
+	local posture = nil
+	local info = rig:FindFirstChild("Info")
+	if info then
+		posture = info:FindFirstChild("Posture")
+	end
+
+	return rig, root, hum, posture
+end
+
+local function DistanceOk(model)
+	if not Config.ESPMaxDistance then return true end
+	local my = GetMyHRP()
+	if not my then return true end
+
+	local rig, root = ResolveESPModel(model)
+	if not rig or not root then return false end
+
+	return (my.Position - root.Position).Magnitude <= Config.ESPMaxDistance
+end
+
+local function HasESP(model)
+	local rig, root = ResolveESPModel(model)
+	if not rig or not root then return false end
+	return root:FindFirstChild("StatusESP") ~= nil
+end
+
+local function RemoveESPFromModel(model)
+	local rig, root = ResolveESPModel(model)
+	if not rig or not root then return end
+
+	local gui = root:FindFirstChild("StatusESP")
+	if gui then gui:Destroy() end
+end
+
+local function CreateESP(model)
+	if not Config.ESPEnabled then return end
+	if not model or not model:IsA("Model") then return end
+
+	-- ignore our own character
+	if LocalPlayer.Character and model == LocalPlayer.Character then return end
+
+	if not DistanceOk(model) then return end
+
+	local rig, root, humanoid, posture = ResolveESPModel(model)
+	if not rig or not root or not humanoid then return end
+	if root:FindFirstChild("StatusESP") then return end
+
+	-- Billboard
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "StatusESP"
+	billboard.Adornee = root
+	billboard.Size = UDim2.new(2, 0, 3, 0)
+	billboard.StudsOffset = Vector3.new(3, 0, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Parent = root
+
+	-- =========================
+	-- HEALTH BAR
+	-- =========================
+	local healthBg = Instance.new("Frame")
+	healthBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+	healthBg.BackgroundTransparency = 0.1
+	healthBg.BorderSizePixel = 0
+	healthBg.Size = UDim2.new(0.1, 0, 1.3, 0)
+	healthBg.Position = UDim2.new(0.15, 0, -0.075, 0)
+	healthBg.Parent = billboard
+
+	local healthFill = Instance.new("Frame")
+	healthFill.AnchorPoint = Vector2.new(0, 1)
+	healthFill.Position = UDim2.new(0, 0, 1, 0)
+	healthFill.Size = UDim2.new(1, 0, 1, 0)
+	healthFill.BorderSizePixel = 0
+	healthFill.Parent = healthBg
+
+	StyleBar(
+		healthBg,
+		healthFill,
+		ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 90, 40)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 220, 100)),
+		})
+	)
+
+	-- =========================
+	-- POSTURE BAR (only if exists)
+	-- =========================
+	local postureFill = nil
+	if posture then
+		local postureBg = Instance.new("Frame")
+		postureBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+		postureBg.BackgroundTransparency = 0.1
+		postureBg.BorderSizePixel = 0
+		postureBg.Size = UDim2.new(0.1, 0, 1, 0)
+		postureBg.Position = UDim2.new(0.75, 0, 0, 0)
+		postureBg.Parent = billboard
+
+		postureFill = Instance.new("Frame")
+		postureFill.AnchorPoint = Vector2.new(0, 1)
+		postureFill.Position = UDim2.new(0, 0, 1, 0)
+		postureFill.Size = UDim2.new(1, 0, 1, 0)
+		postureFill.BorderSizePixel = 0
+		postureFill.Parent = postureBg
+
+		StyleBar(
+			postureBg,
+			postureFill,
+			ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 90, 0)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 215, 0)),
+			})
+		)
+	end
+
+	-- =========================
+	-- CONNECTIONS
+	-- =========================
+	humanoid.HealthChanged:Connect(function()
+		UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
+	end)
+	UpdateBar(healthFill, humanoid.Health, humanoid.MaxHealth)
+
+	if posture and postureFill then
+		posture.Changed:Connect(function()
+			UpdateBar(postureFill, posture.Value, posture.MaxValue)
+		end)
+		UpdateBar(postureFill, posture.Value, posture.MaxValue)
+	end
+end
+
+-- ===== enable/disable helpers (script2 style) =====
+local function RemoveAllESP()
+	-- players
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			RemoveESPFromModel(p.Character)
+		end
+	end
+
+	-- entities
+	if Config.TargetFolder then
+		for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+			if m:IsA("Model") then
+				RemoveESPFromModel(m)
+			end
+		end
+	end
+end
+
+local function CreateESPForEveryone()
+	-- players
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			task.spawn(function() CreateESP(p.Character) end)
+		end
+	end
+
+	-- entities
+	if Config.TargetFolder then
+		for _, m in ipairs(Config.TargetFolder:GetChildren()) do
+			if m:IsA("Model") then
+				task.spawn(function() CreateESP(m) end)
+			end
+		end
+	end
+end
+
+local ESPHooksSetup = false
+local function SetupESPHooks()
+	if ESPHooksSetup then return end
+	ESPHooksSetup = true
+
+	-- players
+	for _, p in ipairs(Players:GetPlayers()) do
+		p.CharacterAdded:Connect(function(char)
+			task.wait(0.25)
+			if Config.ESPEnabled then CreateESP(char) end
+		end)
+	end
+
+	Players.PlayerAdded:Connect(function(p)
+		p.CharacterAdded:Connect(function(char)
+			task.wait(0.25)
+			if Config.ESPEnabled then CreateESP(char) end
+		end)
+	end)
+
+	-- entities folder
+	if Config.TargetFolder then
+		Config.TargetFolder.ChildAdded:Connect(function(child)
+			if not child:IsA("Model") then return end
+			task.wait(0.25)
+			if Config.ESPEnabled then CreateESP(child) end
+		end)
+
+		Config.TargetFolder.ChildRemoved:Connect(function(child)
+			if not child:IsA("Model") then return end
+			RemoveESPFromModel(child)
+		end)
+	end
+end
+
+local function ApplyESPState(enabled)
+	enabled = (enabled == true)
+	Config.ESPEnabled = enabled
+	SaveManager:Save()
+
+	SetupESPHooks()
+
+	if enabled then
+		CreateESPForEveryone()
+	else
+		RemoveAllESP()
+	end
+end
+
+-- apply once
+ApplyESPState(Config.ESPEnabled)
+
+
+
+-- ==============================================================================
+-- [INITIALIZATION]
+-- ==============================================================================
+task.spawn(getgenv().LoadValidAnimations)
+
+-- Loop through existing entities
+if Config.TargetFolder then
+    for _, child in pairs(Config.TargetFolder:GetChildren()) do
+        ConnectEntity(child)
+    end
+    Config.TargetFolder.ChildAdded:Connect(function(child)
+        task.wait(0.5) 
+        ConnectEntity(child)
+    end)
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+end)
+
+
+-- ==============================================================================
+-- [BOSS AUTO FARM] (Closest Devil, No Range Limit)
+-- Targets workspace.World.Entities
+-- ==============================================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local EntitiesFolder = Workspace:WaitForChild("World"):WaitForChild("Entities")
+
+-- SETTINGS
+local HOVER_HEIGHT = -7
+local BACK_OFFSET = 0
+local TWEEN_TIME = 0.08
+
+-- STATE
+local currentTarget = nil
+local lockConn = nil
+local inLock = false
+
+-- ======================================================
+-- HELPERS
+-- ======================================================
+local function getHRP()
+	local char = LocalPlayer.Character
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHumanoid(model)
+	return model and model:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot(model)
+	if not model or not model:IsA("Model") then return nil end
+	if model.PrimaryPart then return model.PrimaryPart end
+	return model:FindFirstChild("HumanoidRootPart")
+end
+
+local function isValidDevil(model)
+	if not model or not model:IsA("Model") then return false end
+	if model:GetAttribute("Group") ~= "Devils" then return false end
+
+	local hum = getHumanoid(model)
+	if not hum or hum.Health <= 0 then return false end
+
+	return getRoot(model) ~= nil
+end
+
+-- ======================================================
+-- TARGET SELECTION (CLOSEST DEVIL)
+-- ======================================================
+local function findClosestDevil()
+	local hrp = getHRP()
+	if not hrp then return nil end
+
+	local closest, closestDist = nil, math.huge
+
+	for _, m in ipairs(EntitiesFolder:GetChildren()) do
+		if isValidDevil(m) then
+			local root = getRoot(m)
+			local dist = (root.Position - hrp.Position).Magnitude
+			if dist < closestDist then
+				closestDist = dist
+				closest = m
+			end
+		end
+	end
+
+	return closest
+end
+
+-- ======================================================
+-- MOVEMENT / LOCK
+-- ======================================================
+local function stopLock()
+	if lockConn then
+		lockConn:Disconnect()
+		lockConn = nil
+	end
+	inLock = false
+	currentTarget = nil
+end
+
+local function hoverCF(targetRoot)
+	local pos =
+		targetRoot.Position
+		+ Vector3.new(0, HOVER_HEIGHT, 0)
+		+ (targetRoot.CFrame.LookVector * BACK_OFFSET)
+
+	return CFrame.lookAt(pos, targetRoot.Position)
+end
+
+local function tweenTo(cf)
+	local hrp = getHRP()
+	if not hrp then return end
+
+	TweenService:Create(
+		hrp,
+		TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ CFrame = cf }
+	):Play()
+end
+
+-- ======================================================
+-- MAIN LOOP
+-- ======================================================
+task.spawn(function()
+	while true do
+		task.wait(0.15)
+
+		if not Config.DemonAutoFarmEnabled then
+			stopLock()
+			continue
+		end
+
+		local hrp = getHRP()
+		if not hrp then
+			stopLock()
+			continue
+		end
+
+		-- Validate current target
+		if currentTarget then
+			local hum = getHumanoid(currentTarget)
+			if not hum or hum.Health <= 0 or not currentTarget.Parent then
+				stopLock()
+			end
+		end
+
+		-- Acquire new target
+		if not currentTarget then
+			local newTarget = findClosestDevil()
+			if not newTarget then continue end
+
+			currentTarget = newTarget
+			inLock = true
+
+			-- Initial snap
+			local root = getRoot(currentTarget)
+			if root then
+				tweenTo(hoverCF(root))
+			end
+
+			lockConn = RunService.RenderStepped:Connect(function()
+				if not Config.DemonAutoFarmEnabled then
+					stopLock()
+					return
+				end
+
+				if not currentTarget or not currentTarget.Parent then
+					stopLock()
+					return
+				end
+
+				local hum = getHumanoid(currentTarget)
+				if not hum or hum.Health <= 0 then
+					stopLock()
+					return
+				end
+
+				local rootNow = getRoot(currentTarget)
+				if rootNow and hrp then
+					hrp.CFrame = hoverCF(rootNow)
+					hrp.AssemblyLinearVelocity = Vector3.zero
+					hrp.AssemblyAngularVelocity = Vector3.zero
+				end
+			end)
+		end
+	end
+end)
+
+
+-- ==============================================================================
+-- [UI SETUP]
+-- ==============================================================================
+local Window = syde:Init({
+    Title = 'New Game Parry',
+    SubText = 'Auto-Save Active'
+})
+
+
+
+-- Auto-hide default UI if present
+task.spawn(function()
+    task.wait(0.2)
+    local gui = game:GetService("CoreGui"):FindFirstChild("Syde")
+    if not gui and LocalPlayer then
+        gui = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("Syde")
+    end
+    if gui then
+        gui.Enabled = false
+        syde:Notify({ Title = 'UI Hidden', Content = 'Press RightShift to Open', Duration = 4 })
+    end
+end)
+
+local MainTab = Window:InitTab({ Title = 'Main' })
+
+
+
+
+
+-- ==============================================================================
+-- [UI SETUP: AUTOFARMING TAB]
+-- ==============================================================================
+
+local AutofarmTab = Window:InitTab({ Title = 'Autofarming' })
+
+AutofarmTab:Section('Boss Farms', '8932620770') -- Section Header
+--[[
+AutofarmTab:Toggle({
+    Title = 'Devil Auto Farm',
+    Value = Config.DemonAutoFarmEnabled, -- Load saved state if available
+    Config = false,
+    CallBack = function(v)
+        v = (v == true)
+        
+        -- Update Config
+        Config.DemonAutoFarmEnabled = v
+        
+        -- Sync Global (if used elsewhere)
+        getgenv().DemonAutoFarmEnabled = v
+        
+        -- Save immediately
+        SaveManager:Save()
+        
+        -- Optional Notify
+        syde:Notify({
+            Title = "Devil Auto Farm",
+            Content = v and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end
+})
+
+]]
+local APTab = Window:InitTab({ Title = "AP" })
+APTab:Section("General AP", "8932620770")
+
+local SkillsTab = Window:InitTab({ Title = "Skills" })
+SkillsTab:Section("Skill AP", "8932620770")
+
+
+local CreatedSkillUIById = {}
+
+local function BuildSkillsSliders()
+    -- build a sortable list from SkillAnimationIds
+    local list = {}
+    for animId, meta in pairs(Config.SkillAnimationIds) do
+        table.insert(list, {
+            Id = animId,
+            Name = meta.Name or "Unknown",
+        })
+        if Config.SkillSettings[animId] == nil then
+            Config.SkillSettings[animId] = Config.ReactionPct
+        end
+    end
+
+    table.sort(list, function(a, b)
+        return tostring(a.Path) < tostring(b.Path)
+    end)
+
+    for _, item in ipairs(list) do
+        if not CreatedSkillUIById[item.Id] then
+            CreatedSkillUIById[item.Id] = true
+
+            local starter = tonumber(Config.SkillSettings[item.Id]) or Config.ReactionPct
+
+            SkillsTab:CreateSlider({
+                Title = item.Name, -- shows folders deep + name
+                Sliders = {
+                    {
+                        Title = "Reaction %",
+                        Range = {1, 99},
+                        Increment = 1,
+                        StarterValue = starter,
+                        CallBack = function(v)
+                            Config.SkillSettings[item.Id] = v
+                            SaveManager:Save()
+                        end
+                    }
+                }
+            })
+        end
+    end
+end
+
+
+
+local CreatedAPUI = {} -- prevents duplicate sliders if you rebuild
+
+local function BuildAPSliders()
+    local CombatAnims =
+        ReplicatedStorage:WaitForChild("Files")
+        :WaitForChild("Animations")
+        :WaitForChild("Humanoid")
+        :WaitForChild("Combat")
+
+    local folders = {}
+    for _, folder in ipairs(CombatAnims:GetChildren()) do
+        if folder:IsA("Folder") then
+            table.insert(folders, folder.Name)
+
+            -- ensure config entry exists
+            Config.APSettings[folder.Name] = Config.APSettings[folder.Name] or {
+                NormalPct = Config.ReactionPct,
+                CriticalPct = Config.CriticalPct
+            }
+        end
+    end
+    table.sort(folders)
+
+    for _, folderName in ipairs(folders) do
+        -- don’t create duplicates if called multiple times
+        if not CreatedAPUI[folderName] then
+            CreatedAPUI[folderName] = true
+
+            local ap = Config.APSettings[folderName]
+            ap.NormalPct = tonumber(ap.NormalPct) or Config.ReactionPct
+            ap.CriticalPct = tonumber(ap.CriticalPct) or Config.CriticalPct
+
+            APTab:CreateSlider({
+                Title = ("%s"):format(folderName),
+                Sliders = {
+                    {
+                        Title = "Normal %",
+                        Range = {1, 99},
+                        Increment = 1,
+                        StarterValue = ap.NormalPct,
+                        CallBack = function(v)
+                            Config.APSettings[folderName] = Config.APSettings[folderName] or {}
+                            Config.APSettings[folderName].NormalPct = v
+                            SaveManager:Save()
+                        end
+                    },
+                    {
+                        Title = "Critical %",
+                        Range = {1, 99},
+                        Increment = 1,
+                        StarterValue = ap.CriticalPct,
+                        CallBack = function(v)
+                            Config.APSettings[folderName] = Config.APSettings[folderName] or {}
+                            Config.APSettings[folderName].CriticalPct = v
+                            SaveManager:Save()
+                        end
+                    }
+                }
+            })
+        end
+    end
+end
+
+task.spawn(function()
+    task.wait(0.2)
+    if getgenv().LoadValidAnimations then
+        getgenv().LoadValidAnimations()
+    end
+    task.wait(0.2)
+    BuildAPSliders()
+    BuildSkillsSliders()
+    SaveManager:Save()
+end)
+
+
+
+
+
+
+-- [[ MAIN TAB ]]
+MainTab:Section('Toggles', '8932620770')
+
+--// TELEPORTS TAB (FULL UPDATED PART – NO DUPLICATES)
+
+local TeleportsTab = Window:InitTab({ Title = "Teleports" })
+TeleportsTab:Section("World.Dialog", "8932620770")
+
+local TweenService = game:GetService("TweenService")
+local DialogFolder = Workspace:WaitForChild("World"):WaitForChild("Dialog")
+
+-- keyed by stable id, not model reference
+local TeleportButtons = {} -- [id] = button or true
+local TeleportModels  = {} -- [id] = model
+
+local function ModelId(m)
+	if m and m.GetDebugId then
+		return m:GetDebugId()
+	end
+	return tostring(m)
+end
+
+local function GetAnyPartFromModel(m)
+	if not m or not m:IsA("Model") then return nil end
+
+	if m.PrimaryPart and m.PrimaryPart:IsA("BasePart") then
+		return m.PrimaryPart
+	end
+
+	local hrp = m:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		return hrp
+	end
+
+	for _, d in ipairs(m:GetDescendants()) do
+		if d:IsA("BasePart") then
+			return d
+		end
+	end
+
+	return nil
+end
+
+
+
+local function GetHRP()
+	local ch = LocalPlayer and LocalPlayer.Character
+	if not ch then return nil end
+	return ch:FindFirstChild("HumanoidRootPart")
+end
+
+local function TeleportToModel(m)
+	local hrp = GetHRP()
+	if not hrp then return end
+	if not m or not m.Parent then return end
+
+	local part = GetAnyPartFromModel(m)
+	if not part then return end
+
+	local standPos = part.Position + Vector3.new(0, 4, 0) + (part.CFrame.LookVector * -6)
+	local cf = CFrame.lookAt(standPos, part.Position)
+
+	TweenService:Create(
+		hrp,
+		TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ CFrame = cf }
+	):Play()
+end
+
+local function RemoveTeleportButtonById(id)
+	local btn = TeleportButtons[id]
+	TeleportButtons[id] = nil
+	TeleportModels[id] = nil
+
+	if not btn then return end
+	pcall(function()
+		if btn.Destroy then
+			btn:Destroy()
+		elseif btn.Remove then
+			btn:Remove()
+		end
+	end)
+end
+
+local function AddTeleportButton(m)
+	if not m or not m:IsA("Model") then return end
+	local id = ModelId(m)
+
+	-- already tracked
+	if TeleportButtons[id] ~= nil then
+		TeleportModels[id] = m
+		return
+	end
+
+	local btn = TeleportsTab:Button({
+		Title = m.Name,
+		Description = "",
+		CallBack = function()
+			local cur = TeleportModels[id]
+			if cur and cur.Parent then
+				TeleportToModel(cur)
+			end
+		end
+	})
+
+	-- some UI libs return nil; still mark as created
+	TeleportButtons[id] = btn or true
+	TeleportModels[id] = m
+end
+
+-- initial populate
+for _, ch in ipairs(DialogFolder:GetChildren()) do
+	if ch:IsA("Model") then
+		AddTeleportButton(ch)
+	end
+end
+
+-- live updates
+DialogFolder.ChildAdded:Connect(function(ch)
+	if ch:IsA("Model") then
+		AddTeleportButton(ch)
+	end
+end)
+
+DialogFolder.ChildRemoved:Connect(function(ch)
+	if ch:IsA("Model") then
+		RemoveTeleportButtonById(ModelId(ch))
+	end
+end)
+
+-- safety rescan (prevents dupes even if events misfire)
+task.spawn(function()
+	while true do
+		task.wait(1)
+
+		if not DialogFolder or not DialogFolder.Parent then
+			DialogFolder = Workspace:WaitForChild("World"):WaitForChild("Dialog")
+		end
+
+		local present = {}
+
+		for _, ch in ipairs(DialogFolder:GetChildren()) do
+			if ch:IsA("Model") then
+				local id = ModelId(ch)
+				present[id] = true
+
+				if TeleportButtons[id] == nil then
+					AddTeleportButton(ch)
+				else
+					TeleportModels[id] = ch
+				end
+			end
+		end
+
+		for id, _ in pairs(TeleportButtons) do
+			if not present[id] then
+				RemoveTeleportButtonById(id)
+			end
+		end
+	end
+end)
+
+
+MainTab:Toggle({
+    Title = 'Auto Parry',
+    Value = Config.ParryEnabled,
+    Config = false,
+    CallBack = function(v) 
+        Config.ParryEnabled = v 
+        SaveManager:Save()
+    end
+})
+
+--[[
+MainTab:Toggle({
+    Title = 'ESP',
+    Value = Config.ESPEnabled,
+    Config = false,
+    CallBack = function(v)
+        ApplyESPState(v)
+    end
+})
+
+]]
+
+MainTab:Section('Settings', '8932620770')
+
+MainTab:CreateSlider({
+    Title = 'Detection Range',
+    Sliders = {
+        {
+            Title = 'Max Dist',
+            Range = {5, 100},
+            Increment = 1,
+            StarterValue = Config.AwarenessRange,
+            CallBack = function(v) 
+                Config.AwarenessRange = v 
+                SaveManager:Save()
+            end
+        }
+    }
+})
+--[[
+MainTab:CreateSlider({
+    Title = 'Reaction Timing (Normal)',
+    Sliders = {
+        {
+            Title = 'Reaction %',
+            Range = {1, 99},
+            Increment = 1,
+            StarterValue = Config.ReactionPct,
+            CallBack = function(v) 
+                Config.ReactionPct = v 
+                SaveManager:Save()
+            end
+        }
+    }
+})
+]]
+
+--[[
+MainTab:CreateSlider({
+    Title = 'Block Duration',
+    Sliders = {
+        {
+            Title = 'Seconds',
+            Range = {0.1, 2.0},
+            Increment = 0.1,
+            StarterValue = Config.BlockDuration,
+            CallBack = function(v) 
+                Config.BlockDuration = v 
+                SaveManager:Save()
+            end
+        }
+    }
+})
+
+]]
+
+MainTab:Button({
+    Title = 'Reload Animations',
+    Description = 'Rescans ReplicatedStorage for new anims',
+    CallBack = function()
+        if getgenv().LoadValidAnimations then
+            getgenv().LoadValidAnimations()
+            task.wait(0.25)
+BuildAPSliders()
+BuildSkillsSliders()			
+            SaveManager:Save()
+        end
+    end
+})
+
+
+
+-- [[ CRITICALS TAB (NEW) ]]
+
+-- =========================================================
+-- AP TAB: Critical Reaction Timing (legacy/default)
+-- (Keep this ONLY if you still want a global default slider.)
+-- =========================================================
+
+
+-- =========================================================
+-- AUTO-SAVE ON CLOSE (Roblox correct API)
+-- =========================================================
+do
+    local Players = game:GetService("Players")
+    local lp = Players.LocalPlayer
+
+    local function SafeSave()
+        pcall(function() SaveManager:Save() end)
+    end
+
+    if lp and lp.OnTeleport then
+        lp.OnTeleport:Connect(function(state)
+            if state == Enum.TeleportState.Started then
+                SafeSave()
+            end
+        end)
+    end
+
+    if lp then
+        lp.AncestryChanged:Connect(function(_, parent)
+            if parent == nil then
+                SafeSave()
+            end
+        end)
+    end
+end
