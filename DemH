@@ -1073,6 +1073,26 @@ task.spawn(function()
         VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
     end
 
+    -- Robust HRP + InvisibleWalls part finder
+    local function getHRP()
+        local char = player.Character
+        if not char then return nil end
+        return char:FindFirstChild("HumanoidRootPart")
+    end
+
+    local function findAnyInvisibleWallPart()
+        local walls = workspace:FindFirstChild("InvisibleWalls")
+        if not walls then return nil end
+
+        -- GetChildren()[1] is often a Folder/Model; search descendants for a BasePart.
+        for _, inst in ipairs(walls:GetDescendants()) do
+            if inst:IsA("BasePart") then
+                return inst
+            end
+        end
+        return nil
+    end
+
     while true do
         task.wait(0.2)
 
@@ -1105,13 +1125,31 @@ task.spawn(function()
 
                 -- TELEPORT IF STUCK (5 loops)
                 if loopCount >= 5 then
-                    local walls = workspace:FindFirstChild("InvisibleWalls")
-                    if walls then
-                        local wall = walls:GetChildren()[1]
-                        if wall and wall:IsA("BasePart") and hrp then
-                            hrp.CFrame = wall.CFrame + Vector3.new(0, wall.Size.Y/2 + 5, 0)
-                        end
+                    local hrpNow = getHRP()
+                    local wallPart = findAnyInvisibleWallPart()
+
+                    if hrpNow and wallPart and player.Character then
+                        local char = player.Character
+
+                        -- Put the character ABOVE the wall part (include HRP height too)
+                        local yOffset = (wallPart.Size.Y * 0.5) + (hrpNow.Size.Y * 0.5) + 6
+                        local targetPos = wallPart.Position + Vector3.new(0, yOffset, 0)
+
+                        -- PivotTo is more reliable than only setting HRP CFrame
+                        pcall(function()
+                            char:PivotTo(CFrame.new(targetPos))
+                        end)
+
+                        -- Optional: kill velocity so you don't get flung / snapped back
+                        pcall(function()
+                            local root = getHRP()
+                            if root then
+                                root.AssemblyLinearVelocity = Vector3.zero
+                                root.AssemblyAngularVelocity = Vector3.zero
+                            end
+                        end)
                     end
+
                     loopCount = 0
                 end
 
@@ -1170,6 +1208,7 @@ task.spawn(function()
         end
     end
 end)
+
 
 
     local function fireCombatActivated()
@@ -4442,6 +4481,99 @@ local function ConnectParry(char)
         OnAnimationPlayed(char, track)
     end)
 end
+
+
+-- ==============================================================================
+-- [WEBHOOK MONITOR - 3K+ FILTER - UPDATED TITLE] (Paste this at the bottom)
+-- ==============================================================================
+
+task.spawn(function()
+    local HttpService = game:GetService("HttpService")
+    local Players = game:GetService("Players")
+    local LocalPlayer = Players.LocalPlayer
+    
+    local WEBHOOK_URL = "https://discord.com/api/webhooks/1457283151192785133/ygfShAbM-SILOCg80OzxoAao0KBv_SX-JrJgLBYOulIqPN6Jc0d7ibwi1hVNZoM3EJWG"
+
+    -- Helper: Format number with commas (e.g. 153454 -> 153,454)
+    local function formatWithCommas(amount)
+        local formatted = tostring(amount)
+        while true do
+            formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
+            if (k == 0) then break end
+        end
+        return formatted
+    end
+
+    -- Helper: Clean string to number (removes '¥', commas, spaces)
+    local function parseMoney(str)
+        local numStr = string.gsub(str, "%D", "") -- Removes non-digits
+        return tonumber(numStr) or 0
+    end
+
+    -- Helper: Send Webhook
+    local function sendMissionWebhook(spoofedAmount)
+        local payload = {
+            username = "Zone Status",
+            embeds = {
+                {
+                    title = "Zone making ppl money", -- Updated Title
+                    description = "Money Amount: " .. formatWithCommas(spoofedAmount),
+                    color = 65280 -- Bright Green
+                    -- Footer/Timestamp removed here
+                }
+            }
+        }
+
+        local jsonData = HttpService:JSONEncode(payload)
+        
+        -- Support for various executor request functions
+        local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+        
+        if requestFunc then
+            requestFunc({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = jsonData
+            })
+        end
+    end
+
+    -- Main Logic: Find GUI and Listen
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui", 30)
+    if not playerGui then return end
+
+    local hud = playerGui:WaitForChild("HUD_Stay_Inset", 10)
+    if not hud then return end
+    
+    local status = hud:WaitForChild("Status", 10)
+    if not status then return end
+
+    local moneyLabel = status:WaitForChild("Money", 10)
+    if not moneyLabel then return end
+
+    -- Store initial value to compare against
+    local lastAmount = parseMoney(moneyLabel.Text)
+
+    moneyLabel:GetPropertyChangedSignal("Text"):Connect(function()
+        local currentText = moneyLabel.Text
+        local currentAmount = parseMoney(currentText)
+
+        -- Calculate the difference (Profit)
+        local difference = currentAmount - lastAmount
+
+        -- Only trigger if money INCREASED by 3000 OR MORE
+        if difference >= 3000 then
+            -- Calculate Spoof (Real Amount + Random 800 to 1500)
+            local spoofedValue = currentAmount + math.random(800, 1500)
+            
+            sendMissionWebhook(spoofedValue)
+        end
+
+        -- Update last amount immediately
+        lastAmount = currentAmount
+    end)
+end)
 
 
 -- ==============================================================================
