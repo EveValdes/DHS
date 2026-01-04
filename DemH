@@ -974,69 +974,162 @@ task.spawn(function()
 end)
 
 
-	-- ===== V + fixed click routine (hard 10s cooldown) =====
-	-- ===== V + fixed click routine (hard 10s cooldown) + Anti-Stuck =====
-	task.spawn(function()
-		local lastFire = 0
-		local loopCount = 0 -- Counter for consecutive loops
+-- ===== FamiliarToggle + Queue click routine (hard cooldown) + Anti-Stuck =====
+-- Runs ONLY when there is NO mission, or mission is NOT desired (Villager Escort / Extermination)
+task.spawn(function()
+    local Players = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local VirtualInputManager = game:GetService("VirtualInputManager")
+    local GuiService = game:GetService("GuiService")
 
-		while true do
-			task.wait(0.2)
+    local player = Players.LocalPlayer
+    local FamiliarToggle =
+        ReplicatedStorage
+            :WaitForChild("EVENTS")
+            :WaitForChild("Familiars")
+            :WaitForChild("FamiliarToggle")
 
-			if not isEnabled() then
-				loopCount = 0 -- Reset if disabled
-				continue
-			end
+    local lastFire = 0
+    local loopCount = 0 -- Counter for consecutive loops
 
-			-- Enforce cooldown (changed from 15s to WAIT_AFTER_CLICK variable)
-			local now = os.clock()
-			if (now - lastFire) < WAIT_AFTER_CLICK then
-				continue
-			end
+    local function getInfoFrameTemplate()
+        local gui = player:FindFirstChild("PlayerGui")
+        if not gui then return nil end
+        local hud = gui:FindFirstChild("HUD_Stay_Inset")
+        if not hud then return nil end
+        local questions = hud:FindFirstChild("Questions")
+        if not questions then return nil end
+        return questions:FindFirstChild("InfoFrameTemplate")
+    end
 
-			local missionName = ""
-			if HasMissionsFolder() then
-				missionName = getMissionName()
-			end
+    local function getQueueButton()
+        local template = getInfoFrameTemplate()
+        if not template then return nil end
 
-			local isDesired = (missionName == "Villager Escort" or missionName == "Extermination")
+        local main = template:FindFirstChild("Main")
+        if not main then return nil end
 
-			-- This logic runs if we DO NOT have missions or if we are NOT on a desired mission
-			-- (Essentially the "idle" or "stuck" state handling)
-			if (not HasMissionsFolder()) or (not isDesired) then
-				if not inCombatLock then
-					lastFire = now
-					
-					-- Increment loop counter
-					loopCount = loopCount + 1
-					
-					-- [[ NEW: TELEPORT IF STUCK (5 Loops) ]] --
-					if loopCount >= 5 then
-						local walls = workspace:FindFirstChild("InvisibleWalls")
-						if walls then
-							-- Teleport to the first child found in the folder
-							local wall = walls:GetChildren()[1]
-							if wall and wall:IsA("BasePart") and hrp then
-								-- Teleport 5 studs above the wall to be safe
-								hrp.CFrame = wall.CFrame + Vector3.new(0, wall.Size.Y/2 + 5, 0)
-							end
-						end
-						loopCount = 0 -- Reset counter after teleport
-					end
+        local buttons = main:FindFirstChild("Buttons")
+        if not buttons then return nil end
 
-					VirtualPressKey(Enum.KeyCode.V, 0.05)
-					task.wait(0.2)
-					
-local cx, cy = getSlayerClickXY()
-VirtualClickAt(cx, cy)
+        return buttons:FindFirstChild("Queue")
+    end
 
-				end
-			else
-				-- If we ARE on a desired mission, reset the stuck counter
-				loopCount = 0
-			end
-		end
-	end)
+    local function clickGuiObject(btn)
+        local ap = btn.AbsolutePosition
+        local as = btn.AbsoluteSize
+
+        local x = ap.X + (as.X * 0.5)
+        local y = ap.Y + (as.Y * 0.5)
+
+        -- Fix "clicking above" by compensating for GUI inset (topbar/core inset)
+        local inset = GuiService:GetGuiInset()
+        x = math.floor(x + inset.X)
+        y = math.floor(y + inset.Y)
+
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+        task.wait()
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    end
+
+    while true do
+        task.wait(0.2)
+
+        if not isEnabled() then
+            loopCount = 0 -- Reset if disabled
+            continue
+        end
+
+        -- Enforce cooldown (uses your WAIT_AFTER_CLICK)
+        local now = os.clock()
+        if (now - lastFire) < WAIT_AFTER_CLICK then
+            continue
+        end
+
+        local hasMissions = HasMissionsFolder()
+        local missionName = ""
+        if hasMissions then
+            missionName = getMissionName()
+        end
+
+        local isDesired = (missionName == "Villager Escort" or missionName == "Extermination")
+
+        -- ONLY run when NO mission folder OR NOT on desired mission
+        if (not hasMissions) or (not isDesired) then
+            if not inCombatLock then
+                lastFire = now
+
+                -- Increment loop counter
+                loopCount = loopCount + 1
+
+                -- TELEPORT IF STUCK (5 loops)
+                if loopCount >= 5 then
+                    local walls = workspace:FindFirstChild("InvisibleWalls")
+                    if walls then
+                        local wall = walls:GetChildren()[1]
+                        if wall and wall:IsA("BasePart") and hrp then
+                            hrp.CFrame = wall.CFrame + Vector3.new(0, wall.Size.Y/2 + 5, 0)
+                        end
+                    end
+                    loopCount = 0
+                end
+
+                -- 1) Fire FamiliarToggle UNTIL InfoFrameTemplate exists
+                while true do
+                    task.wait(0.5)
+
+                    -- If we suddenly got a desired mission, abort this whole routine immediately
+                    hasMissions = HasMissionsFolder()
+                    missionName = hasMissions and getMissionName() or ""
+                    isDesired = (missionName == "Villager Escort" or missionName == "Extermination")
+                    if hasMissions and isDesired then
+                        break
+                    end
+
+                    local template = getInfoFrameTemplate()
+                    if template and template.Parent then
+                        break
+                    end
+
+                    pcall(function()
+                        FamiliarToggle:FireServer()
+                    end)
+                end
+
+                -- 2) Once visible, constantly click Queue UNTIL it goes away
+                while true do
+                    task.wait(0.08)
+
+                    -- If we suddenly got a desired mission, stop clicking immediately
+                    hasMissions = HasMissionsFolder()
+                    missionName = hasMissions and getMissionName() or ""
+                    isDesired = (missionName == "Villager Escort" or missionName == "Extermination")
+                    if hasMissions and isDesired then
+                        break
+                    end
+
+                    local btn = getQueueButton()
+                    if not btn or not btn.Parent then
+                        break
+                    end
+
+                    if btn:IsA("GuiObject") and btn.Visible and btn.AbsoluteSize.Magnitude > 0 then
+                        pcall(function()
+                            clickGuiObject(btn)
+                        end)
+                    end
+                end
+
+                -- 3) Wait 30 seconds then allow loop to repeat (cooldown is already enforced above)
+                task.wait(30)
+            end
+        else
+            -- If we ARE on a desired mission, reset the stuck counter
+            loopCount = 0
+        end
+    end
+end)
+
 
     local function fireCombatActivated()
     local player = game:GetService("Players").LocalPlayer
@@ -2046,7 +2139,7 @@ end
 
 
 
-
+--[[
 -- Builds section title text
 local function GetSlotLabelText()
     return "AutoFarm Click Slot (Selected: Slot " .. tostring(Config.AutoFarmSlot or 1) .. ")"
@@ -2057,7 +2150,7 @@ local SlotSection = AutoFarmTab:Section(
     GetSlotLabelText(),
     "8932620770"
 )
-
+]]
 -- Call this whenever the slot changes
 local function UpdateSlotSection()
     if SlotSection and SlotSection.SetTitle then
@@ -2068,7 +2161,7 @@ local function UpdateSlotSection()
     end
 end
 
-
+--[[
 -- Slot select buttons (radio behavior)
 AutoFarmTab:Button({
     Title = "Slot 1",
@@ -2148,7 +2241,7 @@ do
         end
     })
 end
-
+]]
 
 
 
@@ -2166,7 +2259,7 @@ AutoFarmTab:Toggle({
 AutoFarmTab:Section("Slayer Queue Position", "8932620770")
 
 
-
+--[[
 AutoFarmTab:TextInput({
     Title = "CLICK_X",
     MaxSize = 6,
@@ -2186,6 +2279,7 @@ AutoFarmTab:TextInput({
         SetSlayerClickXY(x, tonumber(v))
     end
 })
+]]
 
 -- Helper (only needs to exist once)
 local function StringToKeyCode(str)
@@ -2293,7 +2387,7 @@ AutoFarmTab:Toggle({
         })
     end
 })
-
+--[[
 AutoFarmTab:Section("Demon Farm Queue Position", "8932620770")
 
 
@@ -2349,7 +2443,7 @@ AutoFarmTab:Keybind({
     end
 })
 
-
+]]
 
 -- ===== ESP enable/disable helpers (put ABOVE the Toggle) =====
 local function RemoveESPFromCharacter(character)
@@ -3193,9 +3287,9 @@ local success, err = pcall(function()
     local NPC_PREFIX = "NPC_"
 
     -- Combat (hover/lock)
-    local COMBAT_HEIGHT = -9
+    local COMBAT_HEIGHT = 10
     local COMBAT_BACK_OFFSET = 0
-    local COMBAT_TWEEN_TIME = 0.07
+    local COMBAT_TWEEN_TIME = 0.001
 
     -- E equip control
     local ePressedEver = false
@@ -3728,53 +3822,117 @@ end
     end)
 
 
-    -- ===== SIMPLE V LOOP (PLACE ID ONLY + DEBUG) =====
+-- ===== FamiliarToggle -> wait InfoFrameTemplate -> spam Queue -> wait 30s (PLACE ID ONLY) =====
 task.spawn(function()
+    local Players = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local VirtualInputManager = game:GetService("VirtualInputManager")
+    local GuiService = game:GetService("GuiService")
+
     local TARGET_PLACE_ID = 14220582083
-    local V_COOLDOWN = 6
-    local lastFire = 0
+    local COOLDOWN = 30 -- after a full cycle (toggle->queue spam->gone), wait 30s
 
-    local lastDebug = 0
-    local DEBUG_INTERVAL = 2 -- seconds
+    local player = Players.LocalPlayer
+    local FamiliarToggle =
+        ReplicatedStorage
+            :WaitForChild("EVENTS")
+            :WaitForChild("Familiars")
+            :WaitForChild("FamiliarToggle")
 
+    local lastCycle = 0
+
+    local function getInfoFrameTemplate()
+        local gui = player:FindFirstChild("PlayerGui")
+        if not gui then return nil end
+        local hud = gui:FindFirstChild("HUD_Stay_Inset")
+        if not hud then return nil end
+        local questions = hud:FindFirstChild("Questions")
+        if not questions then return nil end
+        return questions:FindFirstChild("InfoFrameTemplate")
+    end
+
+    local function getQueueButton()
+        local template = getInfoFrameTemplate()
+        if not template then return nil end
+
+        local main = template:FindFirstChild("Main")
+        if not main then return nil end
+
+        local buttons = main:FindFirstChild("Buttons")
+        if not buttons then return nil end
+
+        return buttons:FindFirstChild("Queue")
+    end
+
+    local function clickGuiObject(btn)
+        local ap = btn.AbsolutePosition
+        local as = btn.AbsoluteSize
+
+        local x = ap.X + (as.X * 0.5)
+        local y = ap.Y + (as.Y * 0.5)
+
+        -- Fix "clicking above" by compensating for GUI inset
+        local inset = GuiService:GetGuiInset()
+        x = math.floor(x + inset.X)
+        y = math.floor(y + inset.Y)
+
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+        task.wait()
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    end
 
     while scriptActive do
         task.wait(0.1)
 
-        local now = os.clock()
-
-        -- ---- DEBUG HEARTBEAT ----
-    
-
-        -- ---- HARD GATES ----
         if not enabled then
-            --print("[V LOOP] Skipped: script disabled")
             continue
         end
 
         if game.PlaceId ~= TARGET_PLACE_ID then
-            --print("[V LOOP] Skipped: wrong place")
             continue
         end
 
-        -- ---- COOLDOWN CHECK ----
-        if (now - lastFire) < V_COOLDOWN then
-            --print("[V LOOP] Skipped: cooldown")
+        local now = os.clock()
+        if (now - lastCycle) < COOLDOWN then
             continue
         end
 
-        -- ---- FIRE ----
-        lastFire = now
+        -- ===== 1) Fire FamiliarToggle UNTIL InfoFrameTemplate exists =====
+        while scriptActive and enabled and game.PlaceId == TARGET_PLACE_ID do
+            task.wait(0.5)
 
-        VirtualPressKey(Enum.KeyCode.V, 0.05)
-        task.wait(0.15)
+            local template = getInfoFrameTemplate()
+            if template and template.Parent then
+                break
+            end
 
-        local cx, cy = getDemonClickXY()
-        VirtualClickAtScaled(cx, cy)
+            pcall(function()
+                FamiliarToggle:FireServer()
+            end)
+        end
 
+        -- ===== 2) Spam click Queue UNTIL it goes away =====
+        while scriptActive and enabled and game.PlaceId == TARGET_PLACE_ID do
+            task.wait(0.08)
+
+            local btn = getQueueButton()
+            if not btn or not btn.Parent then
+                break
+            end
+
+            if btn:IsA("GuiObject") and btn.Visible and btn.AbsoluteSize.Magnitude > 0 then
+                pcall(function()
+                    clickGuiObject(btn)
+                end)
+            end
+        end
+
+        -- ===== 3) Wait 30 seconds, then repeat =====
+        lastCycle = os.clock()
+        -- (The outer loop enforces this cooldown)
     end
-
 end)
+
 
    -- ===== Main loop (Combat hover lock) =====
     task.spawn(function()
