@@ -800,26 +800,27 @@ VirtualClickAt(ex, ey)
 	-- ===== Villager Escort / Stalked Logic (Force Reset Loop) =====
 task.spawn(function()
     local Players = game:GetService("Players")
-    local player = Players.LocalPlayer
     local Workspace = game:GetService("Workspace")
+    local player = Players.LocalPlayer
 
     while true do
-        task.wait(0.2) -- spam fast but safe
+        task.wait(0.15) -- constant pressure, still safe
 
+        -- If the missions folder is gone, stop killing
         if not HasMissionsFolder() then
             continue
         end
 
         local missionName = getMissionName()
 
+        -- Kill player UNTIL the quest disappears
         if missionName == "Villager Escort" or missionName == "Stalked" then
-            -- LocalPlayer model lives in workspace.Live
             local live = Workspace:FindFirstChild("Live")
             local char = live and live:FindFirstChild("LocalPlayer")
             local hum = char and char:FindFirstChildOfClass("Humanoid")
 
             if hum then
-                hum.Health = 0 -- force reset, spammed
+                hum.Health = 0
             end
         end
     end
