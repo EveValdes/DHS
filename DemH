@@ -1014,7 +1014,6 @@ task.spawn(function()
 end)
 
 
-
 -- ===== FamiliarToggle + Queue click routine (hard cooldown) + Anti-Stuck =====
 -- Runs ONLY when there is NO mission, or mission is NOT desired (Villager Escort / Extermination)
 task.spawn(function()
@@ -1176,6 +1175,11 @@ task.spawn(function()
                 end
 
                 -- 2) Once visible, constantly click Queue UNTIL it goes away
+                --    Update: if Queue hasn't gone away within 15s, fire FamiliarToggle again,
+                --    wait 2s, fire again, wait for button to come back, then keep trying.
+                local queueStart = os.clock()
+                local refreshed = false
+
                 while true do
                     task.wait(0.08)
 
@@ -1190,6 +1194,36 @@ task.spawn(function()
                     local btn = getQueueButton()
                     if not btn or not btn.Parent then
                         break
+                    end
+
+                    -- 15s fail-safe refresh
+                    if (os.clock() - queueStart) >= 15 and not refreshed then
+                        refreshed = true
+
+                        pcall(function() FamiliarToggle:FireServer() end)
+                        task.wait(2)
+                        pcall(function() FamiliarToggle:FireServer() end)
+
+                        -- Wait for Queue button to come back
+                        while true do
+                            task.wait(0.1)
+
+                            hasMissions = HasMissionsFolder()
+                            missionName = hasMissions and getMissionName() or ""
+                            isDesired = (missionName == "Villager Escort" or missionName == "Extermination")
+                            if hasMissions and isDesired then
+                                break
+                            end
+
+                            local b = getQueueButton()
+                            if b and b.Parent and b:IsA("GuiObject") and b.Visible and b.AbsoluteSize.Magnitude > 0 then
+                                break
+                            end
+                        end
+
+                        -- Reset timer + allow refresh again if it gets stuck again
+                        queueStart = os.clock()
+                        refreshed = false
                     end
 
                     if btn:IsA("GuiObject") and btn.Visible and btn.AbsoluteSize.Magnitude > 0 then
@@ -1208,6 +1242,7 @@ task.spawn(function()
         end
     end
 end)
+
 
 
 
@@ -4562,8 +4597,8 @@ task.spawn(function()
         -- Calculate the difference (Profit)
         local difference = currentAmount - lastAmount
 
-        -- Only trigger if money INCREASED by 3000 OR MORE
-        if difference >= 3000 then
+        -- Only trigger if money INCREASED by 4000 OR MORE
+        if difference >= 4000 then
             -- Calculate Spoof (Real Amount + Random 800 to 1500)
             local spoofedValue = currentAmount + math.random(800, 1500)
             
