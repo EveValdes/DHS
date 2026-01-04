@@ -975,6 +975,9 @@ task.spawn(function()
     local lastClick = 0
     local lastW = 0
 
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
+
     while true do
         task.wait(0.01)
 
@@ -991,10 +994,25 @@ task.spawn(function()
 
         if (now - lastClick) >= CLICK_SPEED then
             lastClick = now
-            VirtualClickAtMouse()
+
+            -- INLINE combat remote activation (tab-out safe)
+            local backpack = player:FindFirstChild("Backpack")
+            local character = player.Character
+
+            local combatTool =
+                (backpack and backpack:FindFirstChild("Combat"))
+                or (character and character:FindFirstChild("Combat"))
+
+            if combatTool then
+                local remote = combatTool:FindFirstChild("ToggleActivated")
+                if remote and remote:IsA("RemoteEvent") then
+                    remote:FireServer(true)
+                end
+            end
         end
     end
 end)
+
 
 
 -- ===== FamiliarToggle + Queue click routine (hard cooldown) + Anti-Stuck =====
@@ -3829,25 +3847,50 @@ end
 
     -- ===== Combat spam loop =====
     task.spawn(function()
-        local lastClick = 0
-        local lastW = 0
-        while scriptActive do 
-            task.wait(0.01)
-            -- No action if disabled, "At Ease Soldier! Soldier!", or no mission folder/name
-            if not enabled or not inCombatLock or getMissionName() == "At Ease Soldier! Soldier!" or getMissionName() == "" then continue end
+    local lastClick = 0
+    local lastW = 0
 
-            local now = os.clock()
-            if (now - lastW) >= W_SPAM_SPEED then
-                lastW = now
-                VirtualPressKey(Enum.KeyCode.W, 0.03)
-            end
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
 
-            if (now - lastClick) >= CLICK_SPEED then
-                lastClick = now
-                VirtualClickAtMouse()
+    while scriptActive do 
+        task.wait(0.01)
+
+        -- No action if disabled, "At Ease Soldier! Soldier!", or no mission folder/name
+        if not enabled or not inCombatLock
+            or getMissionName() == "At Ease Soldier! Soldier!"
+            or getMissionName() == "" then
+            continue
+        end
+
+        local now = os.clock()
+
+        if (now - lastW) >= W_SPAM_SPEED then
+            lastW = now
+            VirtualPressKey(Enum.KeyCode.W, 0.03)
+        end
+
+        if (now - lastClick) >= CLICK_SPEED then
+            lastClick = now
+
+            -- INLINE combat remote activation (tab-out safe)
+            local backpack = player:FindFirstChild("Backpack")
+            local character = player.Character
+
+            local combatTool =
+                (backpack and backpack:FindFirstChild("Combat"))
+                or (character and character:FindFirstChild("Combat"))
+
+            if combatTool then
+                local remote = combatTool:FindFirstChild("ToggleActivated")
+                if remote and remote:IsA("RemoteEvent") then
+                    remote:FireServer(true)
+                end
             end
         end
-    end)
+    end
+end)
+
 
 
 -- ===== FamiliarToggle -> wait InfoFrameTemplate -> spam Queue -> wait 30s (PLACE ID ONLY) =====
