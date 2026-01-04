@@ -797,35 +797,54 @@ VirtualClickAt(ex, ey)
 		end
 	end)
 
-	-- ===== Villager Escort / Stalked Logic (Force Reset Loop) =====
 task.spawn(function()
     local Players = game:GetService("Players")
     local Workspace = game:GetService("Workspace")
     local player = Players.LocalPlayer
 
-    while true do
-        task.wait(0.15) -- constant pressure, still safe
+    local lastReset = 0
+    local RESET_COOLDOWN = 1.0 -- seconds
 
-        -- If the missions folder is gone, stop killing
+    local function getResetHumanoid()
+        -- 1) Prefer the actual Roblox character
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then return hum end
+
+        -- 2) Fallbacks: some games mirror the character under workspace.Live
+        local live = Workspace:FindFirstChild("Live")
+        if not live then return nil end
+
+        local liveChar =
+            live:FindFirstChild("LocalPlayer")
+            or live:FindFirstChild(player.Name)
+            or live:FindFirstChild(tostring(player.UserId))
+
+        hum = liveChar and liveChar:FindFirstChildOfClass("Humanoid")
+        return hum
+    end
+
+    while true do
+        task.wait(0.15)
+
         if not HasMissionsFolder() then
             continue
         end
 
         local missionName = getMissionName()
 
-        -- Kill player UNTIL the quest disappears
         if missionName == "Villager Escort" or missionName == "Stalked" then
-            local live = Workspace:FindFirstChild("Live")
-            local char = live and live:FindFirstChild("LocalPlayer")
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-print("wowowowowooww")
-            if hum then
+            local hum = getResetHumanoid()
+            local now = os.clock()
+
+            -- only try to kill if we're alive + cooldown passed
+            if hum and hum.Health > 0 and (now - lastReset) >= RESET_COOLDOWN then
+                lastReset = now
                 hum.Health = 0
             end
         end
     end
 end)
-
 
 
 	-- ===== Number key spam (1–6) ONLY during combat =====
