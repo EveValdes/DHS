@@ -798,43 +798,31 @@ VirtualClickAt(ex, ey)
 		end
 	end)
 
-	-- ===== Villager Escort / Stalked Logic (Return to Menu Spam) =====
-	task.spawn(function()
-		-- Pre-load the RemoteFunction
-		local ReturnRemote = nil
-		local events = ReplicatedStorage:WaitForChild("EVENTS", 5)
-		if events then
-			ReturnRemote = events:WaitForChild("ReturnToMainMenu", 5)
-		end
+	-- ===== Villager Escort / Stalked Logic (Force Reset Loop) =====
+task.spawn(function()
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
 
-		while true do
-			-- Loop every 1 second as requested
-			task.wait(1)
+    while true do
+        task.wait(1) -- do NOT remove (prevents freeze)
 
-			if not isEnabled() then continue end
-			if not HasMissionsFolder() then continue end
+        if not HasMissionsFolder() then
+            continue
+        end
 
-			local missionName = getMissionName()
-			
-			-- Runs for either "Villager Escort" OR "Stalked"
-			if missionName == "Villager Escort" or missionName == "Stalked" then
-				
-				-- Ensure we aren't stuck in combat mode from a previous mission
-				if inCombatLock then
-					stopLock()
-					setMovementLocked(false)
-				end
+        local missionName = getMissionName()
 
-				-- [[ NEW: SPAM RETURN TO MENU ]] --
-				if ReturnRemote then
-					-- Using pcall to prevent crashes if the server rejects the invoke
-					pcall(function()
-						ReturnRemote:InvokeServer()
-					end)
-				end
-			end
-		end
-	end)
+        if missionName == "Village Escort" or missionName == "Stalked" then
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+            if hum then
+                hum.Health = 0 -- Triggers character reset
+            end
+        end
+    end
+end)
+
 
 	-- ===== Number key spam (1–6) ONLY during combat =====
 task.spawn(function()
