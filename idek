@@ -14,6 +14,7 @@ local DEMH_PLACE_IDS = {
     [14220581884] = true,
     [14220581641] = true,
     [14220581261] = true,
+    [99787704841368] = true,
 }
 
 if DEMH_PLACE_IDS[placeId] then
