@@ -435,8 +435,7 @@ end
 end
 
 
-getgenv().SpeedHubEnabled = getgenv().SpeedHubEnabled or false
-getgenv().SpeedHubLoaded = getgenv().SpeedHubLoaded or false
+
 -- ===============================
 -- DEMON AUTOFARM GLOBAL FLAG
 -- ===============================
@@ -802,9 +801,10 @@ VirtualClickAt(ex, ey)
 task.spawn(function()
     local Players = game:GetService("Players")
     local player = Players.LocalPlayer
+    local Workspace = game:GetService("Workspace")
 
     while true do
-        task.wait(1) -- do NOT remove (prevents freeze)
+        task.wait(0.2) -- spam fast but safe
 
         if not HasMissionsFolder() then
             continue
@@ -813,11 +813,13 @@ task.spawn(function()
         local missionName = getMissionName()
 
         if missionName == "Village Escort" or missionName == "Stalked" then
-            local char = player.Character
+            -- LocalPlayer model lives in workspace.Live
+            local live = Workspace:FindFirstChild("Live")
+            local char = live and live:FindFirstChild("LocalPlayer")
             local hum = char and char:FindFirstChildOfClass("Humanoid")
 
             if hum then
-                hum.Health = 0 -- Triggers character reset
+                hum.Health = 0 -- force reset, spammed
             end
         end
     end
@@ -1393,8 +1395,14 @@ end
 
 
 
+-- ===============================
+-- LOAD CONFIG + APPLY STATES
+-- ===============================
+
 SaveManager:Load()
--- Sync demon autofarm after loading config
+
+-- Sync globals FROM config (never the other way around)
+getgenv().SpeedHubEnabled = (Config.SpeedHubEnabled == true)
 getgenv().DemonAutoFarmEnabled = (Config.DemonAutoFarmEnabled == true)
 
 -- Apply slot AFTER load (and ApplyAutoFarmSlot now definitely exists)
@@ -1410,7 +1418,6 @@ getgenv().SlayerClickY = tonumber(Config.ClickXY.Y) or 631
 
 getgenv().DemonClickX = tonumber(Config.ClickXY2.X) or 771
 getgenv().DemonClickY = tonumber(Config.ClickXY2.Y) or 650
-
 
 -- Apply saved SpeedHub state on load (loads SpeedHub if enabled)
 -- Guard against LoadSpeedHub not existing yet (ordering issue)
