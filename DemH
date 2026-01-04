@@ -818,13 +818,14 @@ task.spawn(function()
             local live = Workspace:FindFirstChild("Live")
             local char = live and live:FindFirstChild("LocalPlayer")
             local hum = char and char:FindFirstChildOfClass("Humanoid")
-
+print("wowowowowooww")
             if hum then
                 hum.Health = 0
             end
         end
     end
 end)
+
 
 
 	-- ===== Number key spam (1–6) ONLY during combat =====
