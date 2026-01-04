@@ -812,7 +812,7 @@ task.spawn(function()
 
         local missionName = getMissionName()
 
-        if missionName == "Village Escort" or missionName == "Stalked" then
+        if missionName == "Villager Escort" or missionName == "Stalked" then
             -- LocalPlayer model lives in workspace.Live
             local live = Workspace:FindFirstChild("Live")
             local char = live and live:FindFirstChild("LocalPlayer")
